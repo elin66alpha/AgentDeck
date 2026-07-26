@@ -51,7 +51,9 @@ flowchart LR
   follows the app's Light/Dark appearance. Web bundles a terminal monospace
   font so Chromium keeps normal horizontal character spacing.
 - **Quota workflows.** View Claude, Codex, and Agy usage. Claude and Codex can
-  queue one prompt for the next detected five-hour reset.
+  queue one prompt for the next detected five-hour reset. The backend keeps
+  Claude's five-hour window cycling with a minimal request so its reset time is
+  never unknown.
 - **Notifications.** Live local/browser alerts plus optional Web Push and Android
   FCM for configured deployments.
 

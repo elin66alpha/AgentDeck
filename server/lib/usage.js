@@ -12,8 +12,16 @@ const { AGY_DIR, configuredAgyModel } = require('./agy-paths');
 const CLAUDE_CREDS_PATH = path.join(os.homedir(), '.claude', '.credentials.json');
 const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const CLAUDE_TOKEN_URL = 'https://platform.claude.com/v1/oauth/token';
+const CLAUDE_MESSAGES_URL = 'https://api.anthropic.com/v1/messages';
 const CLAUDE_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 const CLAUDE_OAUTH_BETA = 'oauth-2025-04-20';
+const CLAUDE_API_VERSION = '2023-06-01';
+// The keepalive ping is billed like any other Claude Code turn, so it uses the
+// cheapest model and the smallest possible completion.
+const CLAUDE_KEEPALIVE_MODEL =
+  process.env.CLAUDE_KEEPALIVE_MODEL || 'claude-haiku-4-5';
+const CLAUDE_CODE_SYSTEM_PROMPT =
+  "You are Claude Code, Anthropic's official CLI for Claude.";
 
 const CODEX_AUTH = path.join(os.homedir(), '.codex', 'auth.json');
 const CODEX_CONFIG = path.join(os.homedir(), '.codex', 'config.toml');
@@ -360,6 +368,56 @@ async function getClaudeUsage() {
     },
     fetcher: fetchClaudeUsage,
   });
+}
+
+// Claude's five-hour window only exists while it is running: once it lapses the
+// usage API reports `resets_at: null` until the next real turn, which the app can
+// only show as "unknown". Codex avoids that because its quota probe *is* a live
+// request; Claude's is a plain read, so we send the equivalent minimal turn
+// ourselves to restart the window. One token on the cheapest model, using the
+// same OAuth credential and Claude Code identity as the usage query above.
+async function callClaudeMessages(token) {
+  return httpJson('POST', CLAUDE_MESSAGES_URL, {
+    Authorization: `Bearer ${token}`,
+    'anthropic-beta': CLAUDE_OAUTH_BETA,
+    'anthropic-version': CLAUDE_API_VERSION,
+    'User-Agent': 'claude-cli',
+    Accept: 'application/json',
+  }, {
+    model: CLAUDE_KEEPALIVE_MODEL,
+    max_tokens: 1,
+    system: [{ type: 'text', text: CLAUDE_CODE_SYSTEM_PROMPT }],
+    messages: [{ role: 'user', content: 'hi' }],
+  });
+}
+
+async function primeClaudeSession() {
+  let token = await getValidClaudeToken();
+  let res = await callClaudeMessages(token);
+  if (res.status === 401) {
+    token = await refreshClaudeToken();
+    res = await callClaudeMessages(token);
+  }
+  // 429 means the quota is already exhausted, which is itself a running window:
+  // the ping did its job and the caller should not treat it as a failure.
+  if (res.status !== 200 && res.status !== 429) {
+    const detail =
+      (res.body && res.body.error && res.body.error.message) || res.raw || '';
+    throw new UsageQueryError(
+      `Claude keepalive request failed (HTTP ${res.status}). ${detail}`.trim(),
+      res.status,
+    );
+  }
+  return { status: res.status, model: CLAUDE_KEEPALIVE_MODEL };
+}
+
+// Drop the in-memory TTL for one source so the next read re-queries the API.
+// Used after the keepalive ping so the fresh `resets_at` is picked up at once
+// instead of after the normal cache window.
+function invalidateUsageCache(key) {
+  const caches = { claude: () => claudeCache, codex: () => codexCache, agy: () => agyCache };
+  const cache = caches[key] && caches[key]();
+  if (cache) cache.at = 0;
 }
 
 function httpHeadersOnly(url, headers, bodyStr) {
@@ -947,7 +1005,9 @@ module.exports = {
   getClaudeUsage,
   getCodexUsage,
   getAgyUsage,
+  invalidateUsageCache,
   normalizeAgyQuotaSummary,
   markExpiredQuotas,
+  primeClaudeSession,
   buildUsageReport,
 };

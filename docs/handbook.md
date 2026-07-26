@@ -179,6 +179,14 @@ The usage screen reports Claude Code, Codex, and Antigravity. Reset detection an
 scheduled messages support Claude Code and Codex only. A schedule stores one
 prompt per source and workspace for the next detected five-hour reset.
 
+Claude's five-hour window only exists while it runs: once it lapses the usage API
+reports no reset time, which the app can only show as unknown. The backend keeps
+the window cycling by sending one minimal Claude Code request (cheapest model,
+one output token) whenever the window is idle, then sleeping until just after the
+new reset moment — the same effect Codex gets for free from its quota probe. Set
+`ENABLE_CLAUDE_KEEPALIVE=false` to turn it off and accept the unknown state;
+`CLAUDE_KEEPALIVE_MODEL` overrides the model used for the ping.
+
 Notification delivery has three layers:
 
 - Android, iOS, macOS, and Windows can show local notifications while Relay is

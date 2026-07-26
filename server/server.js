@@ -55,6 +55,7 @@ const push = require('./lib/push');
 const fcm = require('./lib/fcm');
 const { notifyAll } = require('./lib/notify');
 const { startQuotaWatch } = require('./lib/quota-watch');
+const { startClaudeQuotaKeepalive } = require('./lib/quota-keepalive');
 const { authStatus } = require('./lib/auth-status');
 const { buildDiagnostics } = require('./lib/diagnostics');
 const {
@@ -112,6 +113,7 @@ const PORT = parseInt(process.env.PORT || '8787', 10);
 const HOST = process.env.HOST || '127.0.0.1';
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || '').replace(/\/+$/, '');
 const ENABLE_QUOTA_WATCH = process.env.ENABLE_QUOTA_WATCH !== 'false';
+const ENABLE_CLAUDE_KEEPALIVE = process.env.ENABLE_CLAUDE_KEEPALIVE !== 'false';
 const WEB_BUILD_DIR = path.join(__dirname, '..', 'build', 'web');
 // Hard cap on a single download (file, or the uncompressed total behind a zip).
 // Public tunnels can relay slowly or enforce throughput limits, so we refuse
@@ -1014,6 +1016,9 @@ const server = app.listen(PORT, HOST, () => {
         });
       },
     });
+  }
+  if (ENABLE_CLAUDE_KEEPALIVE) {
+    startClaudeQuotaKeepalive();
   }
 });
 terminalManager.attachServer(server);
