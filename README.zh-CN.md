@@ -139,4 +139,9 @@ Relay/
 ```
 
 贡献者和编程 agent 请先阅读 [AGENTS.md](AGENTS.md)，版本记录见
-[CHANGELOG.md](CHANGELOG.md)。
+[CHANGELOG.md](CHANGELOG.md)。GitHub Actions 会在 pull request 上运行静态分析和
+两套测试。
+
+## 许可证
+
+Relay 使用 [MIT License](LICENSE) 发布。

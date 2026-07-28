@@ -22,7 +22,10 @@ already use.
 The credential generator creates a `relay.credentials.v1` QR/JSON envelope with
 the machine id/name, backend URL, and one bearer token. The envelope uses
 PBKDF2-HMAC-SHA256 with 600,000 iterations plus AES-256-GCM with a random salt
-and nonce. Its passphrase is entered interactively and is not written to disk.
+and nonce. Its passphrase is never written to disk. The generator prompts for it
+interactively; `--passphrase` and `RELAY_CREDENTIAL_PASSPHRASE` exist for
+unattended setup and should be avoided otherwise, because both leave the value
+readable in shell history or the process environment.
 
 The backend stores bearer-token records and metadata in `server/tokens.json`.
 That file is a secret and is written owner-only. Native

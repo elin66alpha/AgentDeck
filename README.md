@@ -155,4 +155,9 @@ Relay/
 ```
 
 Contributors and coding agents should read [AGENTS.md](AGENTS.md). Release
-history is in [CHANGELOG.md](CHANGELOG.md).
+history is in [CHANGELOG.md](CHANGELOG.md). GitHub Actions runs the analyzer and
+both test suites on pull requests.
+
+## License
+
+Relay is released under the [MIT License](LICENSE).

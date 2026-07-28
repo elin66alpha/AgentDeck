@@ -47,7 +47,10 @@ clients and bundles CanvasKit locally instead of depending on gstatic.
   agent login, sessions, quota, and the SSH terminal ticket.
 - `server/lib/`: agent runners, settings/model discovery, persistence, auth,
   filesystem policy, history, quota, push, and orchestration helpers.
-- `backends/`: Linux, macOS, and Windows install/service adapters.
+- `backends/`: Linux, macOS, and Windows install/service adapters. Each OS has
+  `setup`, `start`, `stop`, `status`, and `uninstall` entry points.
+- `.github/workflows/ci.yml`: runs the verification commands below on pull
+  requests. Update it when those commands change.
 - `scripts/`: development, deployment, and screenshot helpers.
 - `test/` and `server/test/`: Flutter and Node test suites.
 
@@ -90,6 +93,10 @@ clients and bundles CanvasKit locally instead of depending on gstatic.
   destructures a new helper, add it to the context in `server/server.js`.
 - Use `server/lib/json-store.js` for JSON state: cached reads, atomic replace,
   and owner-only file permissions. Do not create ad hoc read/modify/write stores.
+- A generated state file may accept a `RELAY_*_FILE` absolute-path override so
+  its module is testable without touching deployment state. When adding one to a
+  file that the file API denies, take the path from the owning module rather than
+  rebuilding it in `server/lib/filesystem.js`.
 - New notifications should go through `server/lib/notify.js`, which fans out to
   configured Web Push and FCM channels.
 - Prompts are passed as one argv token and are capped by `PROMPT_MAX_BYTES`.
@@ -145,3 +152,6 @@ override, not a shared catalog.
   when adding response fields.
 - Documentation changes: verify local Markdown links, commands, environment
   names, and English/Chinese README parity against code rather than old docs.
+- Release bumps touch four places, which drift apart if any is missed:
+  `pubspec.yaml`, `server/package.json`, `_applicationVersion` in
+  `lib/features/settings/app_settings_screen.dart`, and a `CHANGELOG.md` entry.

@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.1.5 - 2026-07-27
+
+### Added
+
+- The backend keeps Claude's five-hour quota window cycling with one minimal
+  request whenever the window is idle, so its reset time is no longer reported
+  as unknown after a lapse. Set `ENABLE_CLAUDE_KEEPALIVE=false` to opt out.
+- Linux service scripts (`start.sh`, `stop.sh`, `status.sh`, `uninstall.sh`)
+  alongside the existing macOS and Windows sets.
+- An MIT `LICENSE` and a GitHub Actions workflow running the analyzer and both
+  test suites.
+- Test coverage for the file API access policy, the device-token store, and
+  quota schedules.
+
+### Changed
+
+- `server/.env.example` documents the remaining supported settings, including
+  the state-file overrides and the keepalive retry interval.
+- The denylist that protects `tokens.json` now follows `RELAY_TOKENS_FILE`
+  instead of assuming the default location.
+- Documented that the credential generator also accepts a passphrase from
+  `--passphrase` or `RELAY_CREDENTIAL_PASSPHRASE`.
+
 ## 0.1.4 - 2026-07-13
 
 ### Added

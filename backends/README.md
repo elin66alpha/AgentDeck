@@ -46,6 +46,15 @@ app and enter the passphrase you chose.
 ### Linux
 
 ```bash
+./backends/linux/status.sh
+./backends/linux/start.sh
+./backends/linux/stop.sh
+./backends/linux/uninstall.sh
+```
+
+These wrap PM2, which remains available directly:
+
+```bash
 pm2 list
 pm2 logs relay-server
 pm2 restart relay-server --update-env
@@ -53,7 +62,10 @@ pm2 logs relay-tunnel
 ```
 
 Linux setup requires PM2 (`npm install -g pm2`). It creates `relay-server` and,
-for tunnel modes, `relay-tunnel`. The interactive terminal's PTY dependency is
+for tunnel modes, `relay-tunnel`. Logs are under `~/.pm2/logs/` as
+`relay-server-*.log` and `relay-tunnel-*.log`. `uninstall.sh` removes the PM2
+processes and leaves backend data, tokens, and credentials in place. The
+interactive terminal's PTY dependency is
 compiled on Linux, so first-time setup also needs Python 3, `make`, and a C++
 compiler (for example the Debian/Ubuntu `build-essential` package).
 

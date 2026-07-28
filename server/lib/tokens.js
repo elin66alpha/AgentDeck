@@ -5,7 +5,9 @@ const path = require('path');
 
 const { createJsonStore } = require('./json-store');
 
-const TOKENS_FILE = path.join(__dirname, '..', 'tokens.json');
+const TOKENS_FILE = process.env.RELAY_TOKENS_FILE
+  ? path.resolve(process.env.RELAY_TOKENS_FILE)
+  : path.join(__dirname, '..', 'tokens.json');
 
 // Cached, atomic store. The `npm run credential` script writes tokens.json from
 // a separate process; its write changes the file stamp, so this server's cached
@@ -197,6 +199,7 @@ function deleteRevokedTokenById(id) {
 }
 
 module.exports = {
+  TOKENS_FILE,
   createToken,
   deleteRevokedTokenById,
   hasConfiguredToken,

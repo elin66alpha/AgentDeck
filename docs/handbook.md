@@ -63,7 +63,9 @@ hold the file in memory up to the configured cap.
 `npm run credential` creates an encrypted `relay.credentials.v1` QR/JSON
 envelope containing the backend URL, machine identity, and one revocable device
 token. It uses PBKDF2-HMAC-SHA256 (600,000 iterations) and AES-256-GCM. The
-passphrase is not saved.
+passphrase is prompted for interactively and is not saved. Unattended setups can
+supply it with `--passphrase` or `RELAY_CREDENTIAL_PASSPHRASE`, at the cost of
+exposing it to shell history or the process environment.
 
 Useful commands from `server/`:
 
