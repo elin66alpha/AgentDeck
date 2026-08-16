@@ -9,7 +9,7 @@
 
 </div>
 
-Relay 让 Claude Code、Codex、Antigravity、OpenCode 和 Hermes 继续运行在已经准备好项目、
+Relay 让 Claude Code、Codex、OpenCode 和 Hermes 继续运行在已经准备好项目、
 shell 与登录态的机器上，再通过同一个 Flutter app 从手机、Web 或桌面重新连接这些本地
 CLI 智能体，不需要把项目搬到托管服务。
 
@@ -19,7 +19,7 @@ Relay 没有云端账号，也没有内置的默认后端。你自己运行 Node
 ```mermaid
 flowchart LR
     C["手机 · Web · 桌面"] -->|"加密的设备凭证"| B["你自己的 Relay 后端"]
-    B --> A["Claude Code · Codex · Agy · OpenCode · Hermes"]
+    B --> A["Claude Code · Codex · OpenCode · Hermes"]
     B --> F["你的项目和文件"]
 ```
 
@@ -27,10 +27,13 @@ flowchart LR
 
 - **实时智能体聊天。** 流式显示回复、取消任务、保留多段 agent 更新；切换会话后长任务
   仍可继续运行。
+- **常驻 agent 会话。** 每个 agent 在消息之间保持一个活的 CLI 会话，就像终端里那样：
+  后续回合省掉冷启动，取消只是打断本回合而不会结束对话，agent 在后台起的活儿到下一
+  回合还在跑。
 - **命名会话。** 每个工作目录与 agent 最多有 8 个持久会话，聊天历史和运行状态可在
   多设备间同步。
-- **Agent 状态与登录。** 查看五种 agent 的安装和认证状态。兼容的后端可为 Claude、
-  Codex、Agy 中转 OAuth；OpenCode 与 Hermes 的密钥仍由后端主机管理。
+- **Agent 状态与登录。** 查看四种 agent 的安装和认证状态。兼容的后端可为 Claude、
+  Codex 中转 OAuth；OpenCode 与 Hermes 的密钥仍由后端主机管理。
 - **按 agent 配置。** 在输入区选择模型、思考深度和权限。Claude Code 与 Codex 还会
   显示默认关闭的快速模式；快速响应可能消耗更多额度或产生更高费用。
 - **Codex 动态目录。** 从已安装 Codex CLI 的结构化元数据读取模型与每个模型支持的
@@ -38,12 +41,12 @@ flowchart LR
 - **蜂群。** 多个 agent 共享一份记录；每位成员可设置工作树、模型、思考深度、权限、
   昵称和人设。用 `@` 召唤成员，同一条消息中的多个成员会基于同一快照并行运行。
   蜂群还可保存和导入 JSON 模板。
-- **只读 BTW 旁路对话。** 向 Claude、Codex 或 Agy 提问而不改变主任务的原生会话。
+- **只读 BTW 旁路对话。** 向 Claude 或 Codex 提问而不改变主任务的原生会话。
 - **远程文件。** 浏览后端允许的绝对路径、切换工作目录、上传文件、下载文件或压缩文件夹。
 - **SSH 终端。** 从“管理凭证 → 进入SSH”打开当前后端机器上唯一且可恢复的终端；终端
   使用后端系统用户运行，并跟随 app 的“白天/黑夜”外观。Web 端内置等宽终端字体，
   避免 Chromium 中的字符横向间距过大。
-- **额度工作流。** 查看 Claude、Codex 和 Agy 额度；只有 Claude 与 Codex 可以预约在
+- **额度工作流。** 查看 Claude 与 Codex 额度；两者都可以预约在
   下一个检测到的 5 小时额度重置后自动发送一条消息。后端会用一次极小请求让 Claude
   的 5 小时窗口持续滚动，重置时间不再显示为“未知”。
 - **通知。** 在线时使用本地/浏览器通知；配置后还可使用 Web Push 和 Android FCM。
@@ -53,7 +56,7 @@ flowchart LR
 ### 1. 准备后端
 
 准备一台安装了 Node.js 18+ 的 Linux、macOS 或 Windows 主机，并至少安装一个支持的
-CLI。Claude、Codex 和 Agy 需要登录；OpenCode 与 Hermes 的 provider 配置在主机完成。
+CLI。Claude 与 Codex 需要登录；OpenCode 与 Hermes 的 provider 配置在主机完成。
 
 在仓库根目录运行后端系统对应的命令：
 

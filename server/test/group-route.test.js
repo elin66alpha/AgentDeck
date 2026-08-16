@@ -69,7 +69,7 @@ function buildContext() {
     activeRequests: new Map(),
     agentTurnDependencies,
     clearHistory: history.clearHistory,
-    clearSession: () => {},
+    purgeSession: async () => true,
     finalizeStaleStreamingHistory: history.finalizeStaleStreamingHistory,
     getAgent: (key) => AGENTS[key] || null,
     normalizeDeviceId: () => '',

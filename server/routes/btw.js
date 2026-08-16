@@ -6,7 +6,7 @@ const express = require('express');
 // memory but never touches the main task. Each supported CLI forks or clones
 // its own native session storage into a dedicated `btw:<agent>` scope so the
 // side chat never writes back to the main conversation.
-const BTW_SUPPORTED = new Set(['claude', 'codex', 'agy']);
+const BTW_SUPPORTED = new Set(['claude', 'codex']);
 
 function btwScopeAgent(agentKey) {
   return `btw:${agentKey}`;
@@ -18,7 +18,7 @@ module.exports = function createBtwRouter(ctx) {
     activeRequests,
     agentTurnDependencies,
     clearHistory,
-    clearSession,
+    purgeSession,
     createChatResponder,
     finalizeStaleStreamingHistory,
     normalizeDeviceId,
@@ -172,7 +172,7 @@ module.exports = function createBtwRouter(ctx) {
   // question forks the main conversation afresh. Resolve the scope the same way
   // as /api/btw and /api/btw/history (off the canonical session id) so we always
   // clear the exact key those wrote to.
-  router.post('/api/btw/clear', (req, res) => {
+  router.post('/api/btw/clear', async (req, res) => {
     const agentKey = String(req.body.agent || 'claude').trim();
     const requestedSessionId = String(req.body.sessionId || '').trim();
     const scope = resolveBtwScope(req, res, {
@@ -180,13 +180,18 @@ module.exports = function createBtwRouter(ctx) {
       sessionId: requestedSessionId,
     });
     if (!scope) return;
-    const { btwScopeKey } = scope;
+    const { btwScopeKey, workdir } = scope;
     if (runningScopes.has(btwScopeKey)) {
       return res
         .status(409)
         .json({ error: 'a side question is running', code: 'SESSION_BUSY' });
     }
-    clearSession(btwScopeKey);
+    // The side chat is its own forked session, so resetting it deletes that
+    // fork's transcript rather than leaving an unreachable one behind.
+    await purgeSession(btwScopeKey, {
+      agentKey: `btw:${agentKey}`,
+      workdir,
+    });
     clearHistory(btwScopeKey);
     return res.json({ ok: true });
   });

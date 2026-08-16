@@ -3,11 +3,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const http = require('http');
 const https = require('https');
-const { spawn } = require('child_process');
-
-const { AGY_DIR, configuredAgyModel } = require('./agy-paths');
 
 const CLAUDE_CREDS_PATH = path.join(os.homedir(), '.claude', '.credentials.json');
 const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
@@ -28,16 +24,8 @@ const CODEX_CONFIG = path.join(os.homedir(), '.codex', 'config.toml');
 const CODEX_URL = 'https://chatgpt.com/backend-api/codex/responses';
 const CODEX_TOKEN_URL = 'https://auth.openai.com/oauth/token';
 const CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
-const AGY_LOG_DIR = path.join(AGY_DIR, 'log');
-const AGY_QUOTA_RPC_PATH =
-  '/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary';
-const AGY_PROBE_TIMEOUT_MS = parseInt(
-  process.env.AGY_QUOTA_PROBE_TIMEOUT_MS || '12000',
-  10,
-);
 const CODEX_CACHE_MS = 60_000;
 const CLAUDE_CACHE_MS = 60_000;
-const AGY_CACHE_MS = 60_000;
 const USAGE_CACHE_FILE = path.join(__dirname, '..', 'usage-cache.json');
 const USAGE_BACKOFF_BASE_MS = parseInt(
   process.env.USAGE_BACKOFF_BASE_MS || '30000',
@@ -67,12 +55,10 @@ function attachTimeout(req, url) {
 
 let codexCache = { at: 0, fetchedAt: '', value: null, stale: false };
 let claudeCache = { at: 0, fetchedAt: '', value: null, stale: false };
-let agyCache = { at: 0, fetchedAt: '', value: null, stale: false };
 let persistedUsageCache = null;
 const usageBackoff = {
   claude: { until: 0, delayMs: 0, refreshPromise: null, credMtime: 0 },
   codex: { until: 0, delayMs: 0, refreshPromise: null, credMtime: 0 },
-  agy: { until: 0, delayMs: 0, refreshPromise: null, credMtime: 0 },
 };
 
 // Claude/Codex quota credentials are shared with the live CLIs, which rotate
@@ -267,9 +253,7 @@ function httpJson(method, url, headers, body) {
       opts.headers['Content-Type'] = 'application/json';
       opts.headers['Content-Length'] = Buffer.byteLength(data);
     }
-    const parsedUrl = new URL(url);
-    const client = parsedUrl.protocol === 'http:' ? http : https;
-    const req = client.request(parsedUrl, opts, (res) => {
+    const req = https.request(url, opts, (res) => {
       let buffer = '';
       res.on('data', (chunk) => {
         buffer += chunk;
@@ -415,7 +399,7 @@ async function primeClaudeSession() {
 // Used after the keepalive ping so the fresh `resets_at` is picked up at once
 // instead of after the normal cache window.
 function invalidateUsageCache(key) {
-  const caches = { claude: () => claudeCache, codex: () => codexCache, agy: () => agyCache };
+  const caches = { claude: () => claudeCache, codex: () => codexCache };
   const cache = caches[key] && caches[key]();
   if (cache) cache.at = 0;
 }
@@ -580,310 +564,6 @@ async function getCodexUsage() {
   });
 }
 
-// agy's quota RPC speaks proto3 JSON (Connect with Accept: application/json),
-// where a Timestamp is an RFC3339 string. A numeric epoch is accepted too as a
-// defensive fallback; anything else is treated as "unknown" (null).
-function parseTimestamp(value) {
-  if (value == null || value === '') return null;
-  const epoch =
-    typeof value === 'number'
-      ? value
-      : typeof value === 'string' && /^\d+(?:\.\d+)?$/.test(value.trim())
-        ? Number(value)
-        : null;
-  if (epoch != null && Number.isFinite(epoch)) {
-    return new Date(epoch > 10_000_000_000 ? epoch : epoch * 1000).toISOString();
-  }
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date.toISOString();
-}
-
-function recentAgyLogFiles() {
-  try {
-    return fs
-      .readdirSync(AGY_LOG_DIR)
-      .filter((name) => /^cli-.*\.log$/.test(name))
-      .map((name) => {
-        const file = path.join(AGY_LOG_DIR, name);
-        return { file, mtimeMs: fs.statSync(file).mtimeMs };
-      })
-      .sort((a, b) => b.mtimeMs - a.mtimeMs)
-      .slice(0, 12)
-      .map((entry) => entry.file);
-  } catch (_err) {
-    return [];
-  }
-}
-
-function agyHttpPortsFromText(raw) {
-  const ports = [];
-  for (const match of String(raw || '').matchAll(
-    /Language server listening on random port at (\d+) for HTTP/g,
-  )) {
-    const port = Number(match[1]);
-    if (Number.isInteger(port) && port > 0) ports.push(port);
-  }
-  return ports;
-}
-
-async function callAgyQuotaPort(port) {
-  const res = await httpJson(
-    'POST',
-    `http://127.0.0.1:${port}${AGY_QUOTA_RPC_PATH}`,
-    { Accept: 'application/json' },
-    {},
-  );
-  if (res.status === 200 && res.body && res.body.response) return res.body;
-  const message =
-    (res.body && (res.body.message || (res.body.error && res.body.error.message))) ||
-    `HTTP ${res.status}`;
-  throw new UsageQueryError(message, res.status);
-}
-
-async function callRecentAgyQuotaSummary() {
-  // Walk logs newest-first and try each port as it is discovered, returning on
-  // the first live one. The current run's port is almost always in the newest
-  // file, so we rarely read more than one log.
-  const tried = new Set();
-  for (const file of recentAgyLogFiles()) {
-    let raw = '';
-    try {
-      raw = fs.readFileSync(file, 'utf-8');
-    } catch (_err) {
-      continue;
-    }
-    for (const port of agyHttpPortsFromText(raw)) {
-      if (tried.has(port)) continue;
-      tried.add(port);
-      try {
-        return await callAgyQuotaPort(port);
-      } catch (_err) {
-        // Stale log port or not-yet-authenticated instance; try the next one.
-      }
-    }
-  }
-  throw new UsageQueryError(
-    'Antigravity quota API is not reachable. Start `agy` once, then retry.',
-    503,
-  );
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function shellQuote(value) {
-  return `'${String(value).replace(/'/g, `'\\''`)}'`;
-}
-
-async function stopAgyProbe(child) {
-  if (!child || !child.pid) return;
-  try {
-    process.kill(-child.pid, 'SIGTERM');
-  } catch (_err) {
-    try {
-      child.kill('SIGTERM');
-    } catch (_ignored) {
-      // Already gone.
-    }
-  }
-  await sleep(250);
-  try {
-    process.kill(-child.pid, 'SIGKILL');
-  } catch (_err) {
-    // Already gone.
-  }
-}
-
-async function callAgyQuotaSummaryViaProbe() {
-  // The probe forces a PTY with `script -qfec` (util-linux flag syntax) so agy
-  // writes its startup log even when not attached to a terminal. That syntax is
-  // Linux-only; on other platforms the recent-port path still works, so fail
-  // with a clear message instead of a cryptic spawn error.
-  if (process.platform !== 'linux') {
-    throw new UsageQueryError(
-      'Antigravity quota probe is only supported on Linux. Start `agy` once so a recent port is logged, then retry.',
-      503,
-    );
-  }
-  const logPath = path.join(
-    os.tmpdir(),
-    `relay-agy-quota-${process.pid}-${Date.now()}.log`,
-  );
-  const child = spawn(
-    'script',
-    ['-qfec', `agy --log-file ${shellQuote(logPath)}`, '/dev/null'],
-    { detached: true, stdio: 'ignore' },
-  );
-  let spawnError = null;
-  child.once('error', (err) => {
-    spawnError = err;
-  });
-
-  const startedAt = Date.now();
-  try {
-    while (Date.now() - startedAt < AGY_PROBE_TIMEOUT_MS) {
-      if (spawnError) throw spawnError;
-      await sleep(250);
-      let raw = '';
-      try {
-        raw = fs.readFileSync(logPath, 'utf-8');
-      } catch (_err) {
-        continue;
-      }
-      const ports = agyHttpPortsFromText(raw).reverse();
-      for (const port of ports) {
-        try {
-          return await callAgyQuotaPort(port);
-        } catch (_err) {
-          // The server starts before auth/model caches are ready; keep polling.
-        }
-      }
-    }
-  } finally {
-    await stopAgyProbe(child);
-    try {
-      fs.unlinkSync(logPath);
-    } catch (_err) {
-      // Best effort cleanup.
-    }
-  }
-  throw new UsageQueryError(
-    'Antigravity quota API did not become ready in time. Run `agy models` or `agy` once, then retry.',
-    503,
-  );
-}
-
-async function callAgyQuotaSummary() {
-  try {
-    return await callRecentAgyQuotaSummary();
-  } catch (_err) {
-    return callAgyQuotaSummaryViaProbe();
-  }
-}
-
-function agyQuotaGroupKind(modelLabel) {
-  return /claude|gpt/i.test(modelLabel || '') ? 'third_party' : 'gemini';
-}
-
-function agyGroupText(group) {
-  return [
-    group.displayName,
-    group.description,
-    ...(Array.isArray(group.buckets)
-      ? group.buckets.map((bucket) => bucket.bucketId || bucket.displayName || '')
-      : []),
-  ]
-    .join(' ')
-    .toLowerCase();
-}
-
-function selectAgyQuotaGroup(groups, modelLabel) {
-  const preferredKind = agyQuotaGroupKind(modelLabel);
-  const matches = (group) => {
-    const text = agyGroupText(group);
-    if (preferredKind === 'third_party') {
-      return /claude|gpt|\b3p\b|third/.test(text);
-    }
-    return /gemini/.test(text);
-  };
-  return groups.find(matches) || groups[0] || null;
-}
-
-function findAgyBucket(group, kind) {
-  const buckets = Array.isArray(group && group.buckets) ? group.buckets : [];
-  const matches = (bucket) => {
-    const text = [
-      bucket.bucketId,
-      bucket.displayName,
-      bucket.window,
-    ]
-      .join(' ')
-      .toLowerCase();
-    return kind === 'five_hour'
-      ? /five|5h|5.hour/.test(text)
-      : /week|weekly|7/.test(text);
-  };
-  return buckets.find(matches) || null;
-}
-
-function agyBucketQuota(bucket) {
-  if (!bucket) return null;
-  const remainingFraction = Number(bucket.remainingFraction);
-  if (!Number.isFinite(remainingFraction)) return null;
-  return {
-    utilization: clampPercent((1 - remainingFraction) * 100),
-    resets_at: parseTimestamp(bucket.resetTime),
-  };
-}
-
-function compactAgyPlanLabel(value) {
-  if (value == null || typeof value === 'object') return '';
-  const text = String(value).trim();
-  if (!text) return '';
-  const tier = /\b(pro|max|ultra|free|plus|business|enterprise|teams?)\b/i.exec(
-    text,
-  );
-  if (tier) {
-    return tier[1].charAt(0).toUpperCase() + tier[1].slice(1).toLowerCase();
-  }
-  return text.length <= 24 ? text : '';
-}
-
-function agyPlanLabel(response, group) {
-  for (const source of [response, group]) {
-    for (const field of [
-      'subscriptionType',
-      'subscriptionTier',
-      'subscriptionLevel',
-      'planType',
-      'planTier',
-      'plan',
-      'tier',
-      'accountTier',
-    ]) {
-      const label = compactAgyPlanLabel(source && source[field]);
-      if (label) return label;
-    }
-  }
-  return compactAgyPlanLabel(group && group.displayName) || '';
-}
-
-function normalizeAgyQuotaSummary(body, modelLabel = configuredAgyModel()) {
-  const response = body && body.response ? body.response : body;
-  const groups = Array.isArray(response && response.groups) ? response.groups : [];
-  const group = selectAgyQuotaGroup(groups, modelLabel);
-  if (!group) {
-    throw new Error('Antigravity quota summary did not include quota groups.');
-  }
-  const fiveHour = agyBucketQuota(findAgyBucket(group, 'five_hour'));
-  const sevenDay = agyBucketQuota(findAgyBucket(group, 'seven_day'));
-  if (!fiveHour && !sevenDay) {
-    throw new Error('Antigravity quota summary did not include quota buckets.');
-  }
-  return {
-    plan: agyPlanLabel(response, group),
-    five_hour: fiveHour,
-    seven_day: sevenDay,
-  };
-}
-
-async function fetchAgyUsage() {
-  return normalizeAgyQuotaSummary(await callAgyQuotaSummary());
-}
-
-async function getAgyUsage() {
-  return cachedUsage({
-    key: 'agy',
-    ttlMs: AGY_CACHE_MS,
-    getMemoryCache: () => agyCache,
-    setMemoryCache: (cache) => {
-      agyCache = cache;
-    },
-    fetcher: fetchAgyUsage,
-  });
-}
-
 function clampPercent(value) {
   if (value == null || !Number.isFinite(Number(value))) return null;
   return Math.max(0, Math.min(100, Number(value)));
@@ -902,9 +582,8 @@ function quotaItem(key, label, block) {
 }
 
 // A stale cached quota whose reset time has already passed no longer reflects
-// reality: the rolling window refreshed while the source was unreachable (most
-// often a stopped `agy`, whose quota is only readable from a running instance),
-// so the cached utilization is meaningless — the real remaining is back near
+// reality: the rolling window refreshed while the source was unreachable, so
+// the cached utilization is meaningless — the real remaining is back near
 // full. Flag those buckets `expired` so the client shows "window reset, awaiting
 // refresh" instead of a misleading old percentage. Fresh (non-stale) data is
 // never touched, even if its reset moment just passed, because it was just read.
@@ -940,18 +619,6 @@ const USAGE_SOURCES = [
     key: 'codex',
     label: 'Codex',
     fetch: getCodexUsage,
-    normalize: (r) => ({
-      detail: r.plan || '',
-      asOf: r.fetchedAt || null,
-      stale: !!r.stale,
-      fiveHour: r.five_hour,
-      sevenDay: r.seven_day,
-    }),
-  },
-  {
-    key: 'agy',
-    label: 'Antigravity',
-    fetch: getAgyUsage,
     normalize: (r) => ({
       detail: r.plan || '',
       asOf: r.fetchedAt || null,
@@ -1004,9 +671,7 @@ async function buildUsageReport() {
 module.exports = {
   getClaudeUsage,
   getCodexUsage,
-  getAgyUsage,
   invalidateUsageCache,
-  normalizeAgyQuotaSummary,
   markExpiredQuotas,
   primeClaudeSession,
   buildUsageReport,

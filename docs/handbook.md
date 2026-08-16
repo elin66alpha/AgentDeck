@@ -81,10 +81,10 @@ and pasted JSON. Native clients use platform secure storage. The Web client is
 subject to browser-origin storage security, so use a private profile on a
 trusted device.
 
-Relay reports separate installed, authenticated, and usable state for all five
-known agents. Claude Code, Codex, and Agy are OAuth-gated. Their in-app login
-bridge starts the CLI in a PTY, streams the authorization URL, and accepts a
-device code where required. The bridge currently depends on GNU-compatible
+Relay reports separate installed, authenticated, and usable state for all four
+known agents. Claude Code and Codex are OAuth-gated. Their in-app login bridge
+starts the CLI in a PTY, streams the authorization URL, and accepts a device
+code. The bridge currently depends on GNU-compatible
 `script -qfec` (normally Linux); on unsupported hosts, log in directly in a
 terminal. OpenCode and Hermes credentials remain host-managed; once installed,
 Relay allows their runner to start and lets the CLI report provider errors.
@@ -120,6 +120,34 @@ denylist and `RELAY_FS_ROOTS`.
 
 ## Runtime model
 
+### Agent sessions
+
+No agent is re-spawned per turn. Each keeps a live CLI session that turns are fed
+into, the way a terminal session works, so follow-up turns skip the cold start
+and cancelling a turn interrupts it instead of ending the conversation. Claude
+Code runs one Agent SDK process per conversation; OpenCode, Hermes, and Codex
+speak stdio JSON-RPC (`acp` for the first two, `app-server` for Codex), where one
+process per agent hosts every chat because each session carries its own workdir.
+
+Every pool is only a cache. The resumable session id in
+`server/agent-sessions.json` stays authoritative, so a chat whose process was
+closed reloads into the same conversation on its next turn — the same behaviour
+as before, just slower for that one turn.
+
+Idle sessions are closed and there is a cap on how many stay live, because these
+processes are large (roughly 300 MB per Claude process, 360 MB for an opencode
+process plus about 130 MB per session, 90 MB for hermes). See `RELAY_CLAUDE_*`
+and `RELAY_AGENT_*` in `server/.env.example`. Turns past the cap wait for a slot.
+Hermes runs one turn at a time per process, so concurrent Hermes chats queue.
+
+Work an agent starts in the background now outlives the turn that started it,
+except on Codex: its sandbox kills each command's process group as the command
+returns, so background work there survives only if it detaches into its own
+session (`setsid`).
+
+Deleting or clearing a conversation deletes the CLI-side transcript too, so a
+deleted conversation cannot be resumed and does not linger on disk.
+
 ### Workdirs, conversations, and settings
 
 Each device stores its current workdir and sends it in `X-Workdir`. Backend state
@@ -143,13 +171,12 @@ Agent controls are capability-aware:
 |---|---:|---:|---:|---:|---|
 | Claude Code | yes | yes | yes | yes | OAuth |
 | Codex | yes | model-specific | yes | yes | OAuth |
-| Antigravity | yes | no | yes | no | OAuth |
 | OpenCode | yes | yes | yes | no | host-managed, optional key |
 | Hermes | host config/pins | no | yes | no | host-managed key |
 
 Fast mode defaults off, may use more quota or cost more, and is visible only in
 the solo-chat composer. Relay sends an explicit Claude `fastMode` setting or
-Codex `service_tier` override on every invocation. Availability still depends on
+Codex `serviceTier` on every turn. Availability still depends on
 the selected model, CLI version, account, and provider. Swarm storage can retain
 the field, but the current Swarm form exposes only model, effort, and permission.
 
@@ -171,13 +198,14 @@ Swarms can be cleared, updated, deleted, or saved as reusable JSON templates.
 Templates contain the name, member list, and member configuration; they omit the
 machine-specific workdir, id, and transcript.
 
-BTW side conversations are read-only and do not modify the main session. Claude
-forks through its native CLI; Codex and Agy clone their native persisted
-conversation before resuming an isolated side scope.
+BTW side conversations are read-only and do not modify the main session. Both
+Claude and Codex branch through their own CLI: Claude forks its session, Codex
+forks its thread. The fork inherits the main conversation's memory and gets its
+own id, so the side question never writes back into the main task.
 
 ### Quota and notifications
 
-The usage screen reports Claude Code, Codex, and Antigravity. Reset detection and
+The usage screen reports Claude Code and Codex. Reset detection and
 scheduled messages support Claude Code and Codex only. A schedule stores one
 prompt per source and workspace for the next detected five-hour reset.
 
@@ -286,6 +314,8 @@ groups are:
 - execution: `RELAY_DEFAULT_DIR`, `AGENT_TIMEOUT_MS`, `PROMPT_MAX_BYTES`,
   `RELAY_MODEL_DISCOVERY`, `CODEX_HOME`, `RELAY_TERMINAL_SHELL`, and terminal
   idle/buffer limits;
+- agent sessions: `RELAY_CLAUDE_IDLE_MS`, `RELAY_CLAUDE_MAX_LIVE`,
+  `RELAY_CLAUDE_BIN`, `RELAY_AGENT_IDLE_MS`, `RELAY_AGENT_MAX_SESSIONS`;
 - security/files: `CORS_ALLOW_ORIGIN`, `RELAY_FS_ROOTS`, upload/download caps;
 - usage: quota watch, poll interval, HTTP/probe timeouts and backoff;
 - offline push: VAPID keys and `FCM_SERVICE_ACCOUNT_FILE`.

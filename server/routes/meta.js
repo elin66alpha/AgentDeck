@@ -65,7 +65,7 @@ module.exports = function createMetaRouter(ctx) {
           installed,
           authed,
           authKind: status.authKind || 'unknown',
-          // claude/codex/agy (oauth) gate on login; hermes/opencode are managed
+          // claude/codex (oauth) gate on login; hermes/opencode are managed
           // out-of-band (the user sets up their key on the host), so they are
           // usable whenever installed and never gate on a key Relay can't see.
           usable:
@@ -195,7 +195,7 @@ module.exports = function createMetaRouter(ctx) {
 
   // Best-effort login state per agent so the app can warn before sending a
   // message. loggedIn is true/false when detectable from on-disk credentials,
-  // or null when it cannot be determined without running the CLI (e.g. agy).
+  // or null when it cannot be determined without running the CLI.
   router.get('/api/auth/status', (_req, res) => {
     res.json({
       agents: listAgents().map((agent) => ({

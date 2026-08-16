@@ -38,7 +38,7 @@ function handlerFor(router, method, path) {
 // a *different* id, so a route that keys off the raw request id (the old bug)
 // would target a different scope than resolveAgentScope produced.
 function makeCtx(overrides = {}) {
-  const cleared = { sessions: [], histories: [] };
+  const cleared = { sessions: [], histories: [], purged: [] };
   const reads = [];
   const finalized = [];
   const ctx = {
@@ -61,8 +61,9 @@ function makeCtx(overrides = {}) {
       },
     }),
     createChatResponder: () => ({}),
-    clearSession: (key) => {
+    purgeSession: async (key, options) => {
       cleared.sessions.push(key);
+      cleared.purged.push(options);
       return true;
     },
     clearHistory: (key) => {
@@ -192,60 +193,6 @@ test('btw post uses the native agent side runner for codex without transcript se
     !calls[0].prompt.includes('Main chat transcript'),
     'Codex BTW must not be seeded with a Relay transcript prompt',
   );
-});
-
-test('btw post uses the native agent side runner for agy without transcript seeding', async () => {
-  const calls = [];
-  const { ctx } = makeCtx({
-    ctx: {
-      runBtwAgent: (agentKey, prompt, _onEvent, options) => {
-        calls.push({ agentKey, prompt, options });
-        return 'side answer';
-      },
-      runAgentTurn: async (options) => {
-        await options.dependencies.runAgent(
-          options.agentKey,
-          options.prompt,
-          () => {},
-          {
-            sessionKey: options.scopeKey,
-            signal: options.signal,
-            workdir: options.workdir,
-            settings: { permission: 'sandbox' },
-          },
-        );
-      },
-    },
-  });
-  const router = createBtwRouter(ctx);
-  const post = handlerFor(router, 'post', '/api/btw');
-
-  await post(
-    {
-      body: {
-        agent: 'agy',
-        prompt: 'side question',
-        requestId: 'req-agy',
-        sessionId: 'sess-requested',
-      },
-      get: () => '',
-    },
-    fakeResponse(),
-  );
-
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].agentKey, 'agy');
-  assert.equal(calls[0].prompt, 'side question');
-  assert.equal(
-    calls[0].options.mainSessionKey,
-    scopeKeyFor('agy', '/repo', 'sess-canonical'),
-  );
-  assert.equal(
-    calls[0].options.btwSessionKey,
-    scopeKeyFor('btw:agy', '/repo', 'sess-canonical'),
-  );
-  assert.equal(calls[0].options.settings.permission, 'sandbox');
-  assert.ok(!calls[0].prompt.includes('Main chat transcript'));
 });
 
 test('btw clear refuses while a side question is running', async () => {

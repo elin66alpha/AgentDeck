@@ -270,33 +270,6 @@ function runCodexCatalog(args, timeout = 5000) {
   return parseCodexCatalog(String(result.stdout || ''));
 }
 
-// ---- agy ---------------------------------------------------------------------
-
-// agy has no greppable slugs but ships an `agy models` command that prints
-// human-readable names. We pass the printed name straight back as --model; the
-// exact arg format is unverified, so this is a best-effort scaffold.
-function discoverAgyModels() {
-  const result = spawnSync('agy', ['models'], {
-    encoding: 'utf8',
-    timeout: 8000,
-  });
-  if (result.status !== 0) return null;
-  const byId = new Map();
-  for (const rawLine of String(result.stdout || '').split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line) continue;
-    // Drop any help/usage noise that isn't a model name.
-    if (/^(usage|flags?|list available|-h\b|--help\b)/i.test(line)) continue;
-    const id = line
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '');
-    if (!id || byId.has(id)) continue;
-    byId.set(id, { id, label: line, args: ['--model', line] });
-  }
-  return byId.size ? [...byId.values()] : null;
-}
-
 // ---- shared helpers ----------------------------------------------------------
 
 function sortByFamilyThenVersionDesc(list) {
@@ -365,12 +338,6 @@ const STRATEGIES = {
       const cached = readCodexCache();
       return cached.length ? cached : null;
     },
-  },
-  agy: {
-    // Resolve the launcher only for cache-stamping; discovery shells out to
-    // `agy models` rather than reading the (stripped) binary.
-    locate: () => resolveBinary('agy'),
-    discover: () => discoverAgyModels(),
   },
 };
 

@@ -17,7 +17,6 @@ before(async () => {
       getAgentStatuses: () => ({
         claude: { installed: true, authed: true, authKind: 'oauth' },
         codex: { installed: true, authed: false, authKind: 'oauth' },
-        agy: { installed: false, authed: false, authKind: 'oauth' },
         opencode: {
           installed: true,
           authed: true,
@@ -28,7 +27,6 @@ before(async () => {
       listAgents: () => [
         { key: 'claude', label: 'Claude Code', description: 'Claude CLI' },
         { key: 'codex', label: 'Codex', description: 'Codex CLI' },
-        { key: 'agy', label: 'Antigravity', description: 'Agy CLI' },
         { key: 'opencode', label: 'OpenCode', description: 'OpenCode CLI' },
         { key: 'hermes', label: 'Hermes', description: 'Hermes CLI' },
       ],
@@ -53,7 +51,7 @@ test('/api/agents returns every agent with install/auth usability fields', async
   assert.equal(body.defaultAgent, 'claude');
   assert.deepEqual(
     body.agents.map((agent) => agent.key),
-    ['claude', 'codex', 'agy', 'opencode', 'hermes'],
+    ['claude', 'codex', 'opencode', 'hermes'],
   );
 
   const byKey = Object.fromEntries(
@@ -80,7 +78,6 @@ test('/api/agents returns every agent with install/auth usability fields', async
     },
   );
   assert.equal(byKey.codex.usable, false);
-  assert.equal(byKey.agy.usable, false);
   assert.equal(byKey.opencode.usable, true);
   assert.equal(byKey.hermes.authKind, 'apiKey');
   // hermes is managed out-of-band, so it is usable once installed even with no

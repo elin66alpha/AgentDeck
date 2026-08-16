@@ -9,7 +9,7 @@
 
 </div>
 
-Relay keeps Claude Code, Codex, Antigravity, OpenCode, and Hermes on the machine
+Relay keeps Claude Code, Codex, OpenCode, and Hermes on the machine
 where your projects, shell, and credentials already live. It gives you one
 Flutter app for phone, Web, and desktop so you can reconnect to those local CLI
 agents without moving the projects to a hosted service.
@@ -20,7 +20,7 @@ generate an encrypted credential, and import it into the clients you trust.
 ```mermaid
 flowchart LR
     C["Phone · Web · Desktop"] -->|"encrypted device credential"| B["Your Relay backend"]
-    B --> A["Claude Code · Codex · Agy · OpenCode · Hermes"]
+    B --> A["Claude Code · Codex · OpenCode · Hermes"]
     B --> F["Your projects and files"]
 ```
 
@@ -28,11 +28,15 @@ flowchart LR
 
 - **Live agent chat.** Stream replies, cancel turns, preserve multi-part agent
   updates, and continue long work while switching between conversations.
+- **Persistent agent sessions.** Every agent keeps a live CLI session between
+  messages, the way a terminal does, so follow-up turns skip the cold start,
+  cancelling a turn interrupts it instead of ending the conversation, and work an
+  agent starts in the background is still running on the next turn.
 - **Named conversations.** Each workdir and agent supports up to eight persistent
   sessions with shared cross-device history and running-state indicators.
-- **Agent status and login.** See installed/authenticated state for all five
-  agents. Relay can bridge Claude, Codex, and Agy OAuth on compatible backend
-  hosts; OpenCode and Hermes credentials stay host-managed.
+- **Agent status and login.** See installed/authenticated state for all four
+  agents. Relay can bridge Claude and Codex OAuth on compatible backend hosts;
+  OpenCode and Hermes credentials stay host-managed.
 - **Per-agent controls.** Select model, reasoning effort, and permissions in the
   composer. Claude Code and Codex also have a Fast mode switch, off by default;
   fast responses may consume more quota or cost more.
@@ -42,7 +46,7 @@ flowchart LR
   model, effort, permission, nickname, and persona, then summon members with
   `@mentions`. Multiple members run in parallel from one transcript snapshot.
   Swarms can be saved and imported as JSON templates.
-- **Read-only BTW side conversations.** Ask Claude, Codex, or Agy a side question
+- **Read-only BTW side conversations.** Ask Claude or Codex a side question
   without changing the main task's native session.
 - **Remote files.** Browse absolute paths allowed by the backend, change the
   workdir, upload files, and download files or zipped folders.
@@ -50,7 +54,7 @@ flowchart LR
   terminal on the current backend machine. It runs as the backend OS user and
   follows the app's Light/Dark appearance. Web bundles a terminal monospace
   font so Chromium keeps normal horizontal character spacing.
-- **Quota workflows.** View Claude, Codex, and Agy usage. Claude and Codex can
+- **Quota workflows.** View Claude and Codex usage. Both can
   queue one prompt for the next detected five-hour reset. The backend keeps
   Claude's five-hour window cycling with a minimal request so its reset time is
   never unknown.
@@ -62,7 +66,7 @@ flowchart LR
 ### 1. Prepare a backend
 
 You need a Linux, macOS, or Windows machine with Node.js 18+ and at least one
-supported CLI installed. Claude, Codex, and Agy must be logged in; OpenCode and
+supported CLI installed. Claude and Codex must be logged in; OpenCode and
 Hermes provider setup is managed on that host.
 
 From the repository root, run the setup for the backend OS:

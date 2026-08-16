@@ -19,7 +19,8 @@ const {
   runAgent,
   runBtw,
   runBtwAgent,
-  clearSession,
+  purgeSession,
+  shutdownPools,
 } = require('./lib/agents');
 const {
   WorkdirError,
@@ -830,7 +831,7 @@ const routeContext = {
   buildUsageReport,
   cancelQuotaSchedule,
   clearHistory,
-  clearSession,
+  purgeSession,
   createChatResponder,
   createChatSession,
   createQuotaSchedule,
@@ -952,6 +953,9 @@ process.on('exit', flushHistoryForShutdown);
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.once(signal, () => {
     terminalManager.closeAll();
+    // Live agent sessions are children of this process; close them explicitly
+    // so a restart never leaves orphaned CLI processes holding memory.
+    shutdownPools().catch(() => {});
     flushHistoryForShutdown();
     process.exit(exitCodeForSignal(signal));
   });
@@ -960,10 +964,10 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
 const server = app.listen(PORT, HOST, () => {
   console.log(`Relay server listening on http://${HOST}:${PORT}`);
   // Warm the model-discovery cache off the request path. The first scan/spawn
-  // per agent is synchronous (agy even shells out to `agy models`), so priming
-  // it now keeps the first chat turn and options fetch fast.
+  // per agent is synchronous, so priming it now keeps the first chat turn and
+  // options fetch fast.
   setImmediate(() => {
-    for (const agent of ['claude', 'codex', 'agy']) {
+    for (const agent of ['claude', 'codex']) {
       try {
         describeAgent(agent);
       } catch (_err) {
@@ -1010,6 +1014,9 @@ const server = app.listen(PORT, HOST, () => {
           message,
           messageZh: info && info.messageZh,
           category: 'quota',
+          // Matches the tag an open client uses for the event-stream copy, so a
+          // browser that shows both collapses them into one notification.
+          tag: 'quota',
         });
         processDueQuotaSchedules(info).catch((err) => {
           console.error(`[quota:${info && info.key}] scheduled message runner failed: ${err.message}`);

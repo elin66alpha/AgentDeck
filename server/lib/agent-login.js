@@ -2,9 +2,6 @@
 
 const { spawn } = require('child_process');
 const { randomUUID } = require('crypto');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 
 const { commandExists } = require('./agents');
 
@@ -12,36 +9,17 @@ const SESSION_TTL_MS = 15 * 60 * 1000;
 const SESSION_MAX_RUNNING_MS = 15 * 60 * 1000;
 const URL_RE = /https?:\/\/[^\s"'<>]+/g;
 const URL_TRAILING_PUNCT_RE = /[),.;]+$/;
-const AGY_TOKEN_RELATIVE = [
-  '.gemini',
-  'antigravity-cli',
-  'antigravity-oauth-token',
-];
 
 const AUTH_HOSTS = {
   claude: ['anthropic.com', 'claude.ai'],
   codex: ['openai.com', 'chatgpt.com'],
-  agy: ['accounts.google.com', 'google.com'],
 };
 const AUTH_URL_RE = /(auth|authorize|device|login|oauth|verify)/i;
 
 const LOGIN_COMMANDS = {
   claude: ['claude', 'auth', 'login', '--claudeai'],
   codex: ['codex', 'login', '--device-auth'],
-  agy: ['agy'],
 };
-
-function agyTokenPath(homeDir) {
-  return path.join(homeDir, ...AGY_TOKEN_RELATIVE);
-}
-
-function hasNonEmptyFile(fsModule, filePath) {
-  try {
-    return String(fsModule.readFileSync(filePath, 'utf8')).trim().length > 0;
-  } catch (_err) {
-    return false;
-  }
-}
 
 function shellQuote(value) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
@@ -102,9 +80,6 @@ function createAgentLoginManager(options = {}) {
   const nowFn = options.now || (() => Date.now());
   const idFn = options.randomUUID || randomUUID;
   const commandExistsFn = options.commandExists || commandExists;
-  const fsModule = options.fs || fs;
-  const homeDir = options.homeDir || os.homedir();
-  const pollIntervalMs = options.pollIntervalMs || 1000;
   const sessionTtlMs = options.sessionTtlMs || SESSION_TTL_MS;
   const maxRunningMs = options.maxRunningMs || SESSION_MAX_RUNNING_MS;
 
@@ -112,8 +87,6 @@ function createAgentLoginManager(options = {}) {
     return {
       sessionId: session.id,
       agent: session.agent,
-      authMode: session.authMode,
-      requiresCode: session.requiresCode,
     };
   }
 
@@ -182,10 +155,6 @@ function createAgentLoginManager(options = {}) {
 
   function finish(session, status, error = '') {
     if (session.status !== 'running') return;
-    if (session.pollTimer) {
-      clearInterval(session.pollTimer);
-      session.pollTimer = null;
-    }
     session.status = status;
     session.error = error;
     session.finishedAt = nowFn();
@@ -227,15 +196,6 @@ function createAgentLoginManager(options = {}) {
     }
   }
 
-  function startAgyTokenPoll(session) {
-    const tokenPath = agyTokenPath(homeDir);
-    session.pollTimer = setInterval(() => {
-      if (hasNonEmptyFile(fsModule, tokenPath)) {
-        finish(session, 'done');
-      }
-    }, pollIntervalMs);
-  }
-
   function start(agent) {
     cleanup();
     const args = LOGIN_COMMANDS[agent];
@@ -259,20 +219,12 @@ function createAgentLoginManager(options = {}) {
       output: '',
       error: '',
       codeSubmitted: false,
-      authMode: agent === 'agy' ? 'browserOAuth' : 'deviceCode',
-      requiresCode: agent !== 'agy',
       createdAt: nowFn(),
       finishedAt: null,
       listeners: new Set(),
       child: null,
-      pollTimer: null,
     };
     sessions.set(id, session);
-
-    if (agent === 'agy' && hasNonEmptyFile(fsModule, agyTokenPath(homeDir))) {
-      finish(session, 'done');
-      return session;
-    }
 
     const child = spawnFn(
       'script',
@@ -286,20 +238,6 @@ function createAgentLoginManager(options = {}) {
       finish(session, 'error', err.message || 'Failed to start login.');
     });
     child.on('exit', (code, signal) => {
-      if (session.agent === 'agy') {
-        if (hasNonEmptyFile(fsModule, agyTokenPath(homeDir))) {
-          finish(session, 'done');
-        } else {
-          finish(
-            session,
-            'error',
-            signal
-              ? `Agy login process ended with signal ${signal}.`
-              : `Agy login process exited before the OAuth token appeared (code ${code}).`,
-          );
-        }
-        return;
-      }
       if (code === 0) {
         finish(session, 'done');
       } else {
@@ -312,7 +250,6 @@ function createAgentLoginManager(options = {}) {
         );
       }
     });
-    if (agent === 'agy') startAgyTokenPoll(session);
     emit(session, 'login_started');
     return session;
   }
@@ -340,11 +277,6 @@ function createAgentLoginManager(options = {}) {
       err.code = 'LOGIN_SESSION_NOT_FOUND';
       throw err;
     }
-    if (!session.requiresCode) {
-      const err = new Error('Login session does not accept an authorization code.');
-      err.code = 'LOGIN_CODE_NOT_REQUIRED';
-      throw err;
-    }
     if (session.status !== 'running' || !session.child?.stdin?.writable) {
       const err = new Error('Login session is not accepting input.');
       err.code = 'LOGIN_SESSION_CLOSED';
@@ -364,8 +296,6 @@ function createAgentLoginManager(options = {}) {
       status: session.status,
       url: session.url,
       error: session.error,
-      authMode: session.authMode,
-      requiresCode: session.requiresCode,
     };
   }
 
@@ -374,7 +304,6 @@ function createAgentLoginManager(options = {}) {
 
 module.exports = {
   LOGIN_COMMANDS,
-  agyTokenPath,
   createAgentLoginManager,
   selectLoginUrl,
   scriptCommand,

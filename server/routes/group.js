@@ -96,7 +96,7 @@ module.exports = function createGroupRouter(ctx) {
     activeRequests,
     agentTurnDependencies,
     clearHistory,
-    clearSession,
+    purgeSession,
     finalizeStaleStreamingHistory,
     getAgent,
     normalizeDeviceId,
@@ -229,7 +229,7 @@ module.exports = function createGroupRouter(ctx) {
     return res.json({ ok: true, workdir, group, groups: listGroups(workdir) });
   });
 
-  router.post('/api/groups/delete', (req, res) => {
+  router.post('/api/groups/delete', async (req, res) => {
     const workdir = resolveWorkdir(req, res);
     if (workdir === null) return undefined;
     const groupId = String(req.body.groupId || '').trim();
@@ -245,7 +245,10 @@ module.exports = function createGroupRouter(ctx) {
     deleteGroup(workdir, group.id);
     clearHistory(scopeKey);
     for (const memberKey of group.members) {
-      clearSession(memberSessionKeyFor(runWorkdir, group.id, memberKey));
+      await purgeSession(memberSessionKeyFor(runWorkdir, group.id, memberKey), {
+        agentKey: memberKey,
+        workdir: runWorkdir,
+      });
     }
     return res.json({ ok: true, workdir, groups: listGroups(workdir) });
   });
@@ -267,7 +270,7 @@ module.exports = function createGroupRouter(ctx) {
 
   // Reset a swarm's transcript and every member's forked CLI session, keeping the
   // swarm itself. The next message starts the conversation afresh.
-  router.post('/api/group/clear', (req, res) => {
+  router.post('/api/group/clear', async (req, res) => {
     const workdir = resolveWorkdir(req, res);
     if (workdir === null) return undefined;
     const groupId = String(req.body.groupId || '').trim();
@@ -282,7 +285,10 @@ module.exports = function createGroupRouter(ctx) {
     }
     clearHistory(scopeKey);
     for (const memberKey of group.members) {
-      clearSession(memberSessionKeyFor(runWorkdir, group.id, memberKey));
+      await purgeSession(memberSessionKeyFor(runWorkdir, group.id, memberKey), {
+        agentKey: memberKey,
+        workdir: runWorkdir,
+      });
     }
     return res.json({ ok: true, workdir, group });
   });

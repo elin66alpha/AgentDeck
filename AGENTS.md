@@ -1,8 +1,7 @@
 # Relay contributor guide
 
 Relay is a Flutter client plus a self-hosted Node.js backend for controlling
-Claude Code, Codex, Antigravity (`agy`), OpenCode, and Hermes on the backend
-machine. Keep public usage guidance in the root READMEs, operational detail in
+Claude Code, Codex, OpenCode, and Hermes on the backend machine. Keep public usage guidance in the root READMEs, operational detail in
 `docs/handbook.md`, and security guarantees in `SECURITY.md`.
 
 ## Working safely
@@ -75,15 +74,53 @@ clients and bundles CanvasKit locally instead of depending on gstatic.
   through `runAgent(..., { workdir, settings, sessionKey })`; do not add globals.
 - `server/lib/agent-options.js` owns option validation and exact CLI argv.
   `server/lib/agent-settings.js` persists normalized solo-chat settings.
+- No agent runs one process per turn. All four keep a live session that turns
+  are fed into. Every pool is a *cache*: the stored session id stays
+  authoritative, so any scope without a live session cold-starts by resuming it
+  and degrades to exactly the old per-turn behaviour. Do not reintroduce a
+  per-turn `spawn` for an agent that has a pool.
+  - `server/lib/claude-session-pool.js` — one Agent SDK process per scope.
+    Settings resolve to SDK options (`claudeSdkOptions`) rather than argv, and
+    are fixed for the life of a process, so a change restarts it with `resume`.
+  - `server/lib/stdio-agent-pool.js` — the shared pool for the three CLIs that
+    speak line-delimited JSON-RPC on stdio. It owns the process, the wire, the
+    session cap, idle eviction and cancellation; a `driver` supplies the
+    protocol. One process per agent hosts *all* of that agent's scopes, since
+    each session carries its own `cwd`, so a large startup cost is paid once
+    instead of once per chat.
+    - `acp-session-pool.js` — the ACP driver (opencode, hermes). Settings apply
+      over the protocol (`acpSessionOptions`) with no restart. Capabilities from
+      `initialize` gate optional calls: hermes has no `session/close`, so an
+      evicted session is simply dropped.
+    - `codex-session-pool.js` — the codex app-server driver. `turn/start`
+      returns as soon as the turn is *accepted*; the turn is settled by the
+      later `turn/completed` notification. Everything except the sandbox applies
+      per turn (`codexSessionOptions`), and the sandbox is what the runner
+      passes as `fixedKey` so a change reopens the thread — still resuming the
+      same conversation, without respawning the process.
+  - Relay answers the agents' approval requests from the configured tier,
+    because there is no approval UI to route them to. The runner's policy
+    answers yes or no; translating that into each protocol's vocabulary is the
+    driver's job (`allow_once` vs `accept` vs `approved`).
+  - `runAcpAgent` in `agents.js` is the shared runner for opencode and hermes,
+    which differ only by their pool and their entries in the option tables.
+- Codex's /btw fork is the CLI's own `thread/fork`. Do not go back to editing
+  `~/.codex/state_5.sqlite` or copying rollout files.
+- Deleting or clearing a conversation goes through `purgeSession`, not
+  `clearSession`: for a pooled agent it also deletes the CLI-side transcript so
+  the conversation is really gone. Use `clearSession` only for the internal
+  stale-session retry.
+- Test files are `test/*.test.js`. Helper processes live in `test/fixtures/`,
+  which the runner would otherwise try to execute as tests.
 - Fast mode is supported only by Claude Code and Codex and defaults off. Claude
   receives a `fastMode` settings override; Codex receives an explicit
-  `service_tier="fast"` or `service_tier="default"` override.
+  `serviceTier` of `fast` or `default` on every turn.
 - Codex models and model-specific reasoning levels come from structured CLI
   metadata, with bundled/cache/static fallbacks. Do not reintroduce binary
   string scanning for Codex model ids.
-- `GET /api/agents` returns all five known agents with install/auth/usability
-  state. Claude, Codex, and Agy require OAuth; OpenCode and Hermes credentials
-  are managed on the host and become selectable when installed.
+- `GET /api/agents` returns all four known agents with install/auth/usability
+  state. Claude and Codex require OAuth; OpenCode and Hermes credentials are
+  managed on the host and become selectable when installed.
 - The in-app OAuth bridge uses the backend host's `script -qfec` PTY utility.
   Keep the process output redacted and never return credential values.
 
@@ -125,8 +162,8 @@ clients and bundles CanvasKit locally instead of depending on gstatic.
 - Swarm configuration is stored under the workspace that lists it, while its
   chosen work tree is the directory members actually use.
 - BTW is read-only and isolated from the main session. Claude forks natively;
-  Codex and Agy clone their native persisted conversations before resuming the
-  side scope.
+  Codex clones its native persisted conversation before resuming the side
+  scope.
 - The SSH terminal exchanges the bearer credential for a short-lived,
   single-use WebSocket ticket. Never put the bearer token in a socket URL. A
   token record owns one resumable PTY, which runs with the full permissions of

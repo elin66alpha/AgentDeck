@@ -12,7 +12,6 @@ const statusCache = new Map();
 const AUTH_KIND = {
   claude: 'oauth',
   codex: 'oauth',
-  agy: 'oauth',
   hermes: 'apiKey',
   opencode: 'apiKeyOptional',
 };
@@ -54,18 +53,6 @@ function codexAuthed(fsModule, homeDir) {
   const auth = readJson(fsModule, path.join(homeDir, '.codex', 'auth.json'));
   const tokens = auth && auth.tokens;
   return !!(tokens && nonEmpty(tokens.access_token));
-}
-
-function agyAuthed(fsModule, homeDir) {
-  return fileHasText(
-    fsModule,
-    path.join(
-      homeDir,
-      '.gemini',
-      'antigravity-cli',
-      'antigravity-oauth-token',
-    ),
-  );
 }
 
 function hasApiKeyLikeValue(value, keyName = '') {
@@ -113,8 +100,6 @@ function agentAuthed(agentKey, installed, fsModule, homeDir) {
       return claudeAuthed(fsModule, homeDir);
     case 'codex':
       return codexAuthed(fsModule, homeDir);
-    case 'agy':
-      return agyAuthed(fsModule, homeDir);
     case 'hermes':
       return hermesAuthed(fsModule, homeDir);
     case 'opencode':

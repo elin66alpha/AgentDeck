@@ -56,9 +56,9 @@ test('createGroup returns null when there are no valid members', () => {
 test('setGroupMembers replaces the roster and keeps the id', () => {
   const workdir = '/tmp/wd-set';
   const group = groups.createGroup(workdir, 'Team', ['claude']);
-  const updated = groups.setGroupMembers(workdir, group.id, ['codex', 'agy']);
+  const updated = groups.setGroupMembers(workdir, group.id, ['codex', 'opencode']);
   assert.equal(updated.id, group.id);
-  assert.deepEqual(updated.members, ['codex', 'agy']);
+  assert.deepEqual(updated.members, ['codex', 'opencode']);
   assert.equal(groups.setGroupMembers(workdir, 'missing', ['codex']), null);
   assert.equal(groups.setGroupMembers(workdir, group.id, []), null);
 });

@@ -56,15 +56,6 @@ test('detects installed CLI agents and credential files without exposing values'
   writeJson(path.join(home, '.codex', 'auth.json'), {
     tokens: { access_token: 'codex-token' },
   });
-  writeText(
-    path.join(
-      home,
-      '.gemini',
-      'antigravity-cli',
-      'antigravity-oauth-token',
-    ),
-    'agy-token\n',
-  );
   writeJson(path.join(home, '.hermes', 'auth.json'), {
     provider: 'openai',
     apiKey: 'hermes-key',
@@ -72,7 +63,7 @@ test('detects installed CLI agents and credential files without exposing values'
 
   const result = statuses(
     home,
-    new Set(['claude', 'codex', 'agy', 'opencode', 'hermes']),
+    new Set(['claude', 'codex', 'opencode', 'hermes']),
   );
 
   assert.deepEqual(result.claude, {
@@ -81,11 +72,6 @@ test('detects installed CLI agents and credential files without exposing values'
     authKind: 'oauth',
   });
   assert.deepEqual(result.codex, {
-    installed: true,
-    authed: true,
-    authKind: 'oauth',
-  });
-  assert.deepEqual(result.agy, {
     installed: true,
     authed: true,
     authKind: 'oauth',
@@ -110,27 +96,17 @@ test('requires the expected credential shape for each agent', () => {
   writeJson(path.join(home, '.codex', 'auth.json'), {
     tokens: {},
   });
-  writeText(
-    path.join(
-      home,
-      '.gemini',
-      'antigravity-cli',
-      'antigravity-oauth-token',
-    ),
-    '   ',
-  );
   writeJson(path.join(home, '.hermes', 'auth.json'), {
     provider: 'openai',
   });
 
   const result = statuses(
     home,
-    new Set(['claude', 'codex', 'agy', 'opencode', 'hermes']),
+    new Set(['claude', 'codex', 'opencode', 'hermes']),
   );
 
   assert.equal(result.claude.authed, false);
   assert.equal(result.codex.authed, false);
-  assert.equal(result.agy.authed, false);
   assert.equal(result.hermes.authed, false);
   assert.equal(result.opencode.authed, true);
 });

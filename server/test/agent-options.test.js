@@ -7,12 +7,15 @@ process.env.RELAY_MODEL_DISCOVERY = '0';
 
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const {
   buildArgs,
   normalizeSettings,
   describeAgent,
   defaultsFor,
+  acpSessionOptions,
 } = require('../lib/agent-options');
 
 // --- defaultsFor ------------------------------------------------------------
@@ -23,13 +26,6 @@ test('defaultsFor derives the model from the newest catalog entry', () => {
     permission: 'acceptEdits',
     fast: 'off',
     model: 'claude-opus-4-8',
-  });
-});
-
-test('defaultsFor derives the agy model from its catalog', () => {
-  assert.deepEqual(defaultsFor('agy'), {
-    model: 'gemini-3-5-flash-medium',
-    permission: 'sandbox',
   });
 });
 
@@ -101,13 +97,6 @@ test('buildArgs falls back to defaults for forged/unknown option ids (no arg inj
   ]);
 });
 
-test('buildArgs maps agy model and permission to its CLI flags', () => {
-  assert.deepEqual(buildArgs('agy', {}), [
-    '--model', 'Gemini 3.5 Flash (Medium)',
-    '--sandbox',
-  ]);
-});
-
 test('buildArgs maps opencode model/effort/permission to its CLI flags', () => {
   // Default: model from the catalog + bypass permission (effort is opt-in).
   assert.deepEqual(buildArgs('opencode', {}), [
@@ -135,6 +124,64 @@ test('buildArgs returns [] for an unknown agent', () => {
   assert.deepEqual(buildArgs('nope', { permission: 'bypass' }), []);
 });
 
+// --- acpSessionOptions ------------------------------------------------------
+// opencode and hermes run as persistent ACP sessions, so their settings are
+// resolved into protocol values instead of the argv above (which the two
+// buildArgs cases still cover as the shared option table).
+
+test('acpSessionOptions resolves opencode defaults to a model and auto-approval', () => {
+  assert.deepEqual(acpSessionOptions('opencode', {}), {
+    modelId: 'opencode/big-pickle',
+    // opencode has no session mode matching its tiers.
+    modeId: null,
+    approve: true,
+  });
+  assert.deepEqual(
+    acpSessionOptions('opencode', { model: 'opencode/mimo-v2.5-free', permission: 'ask' }),
+    { modelId: 'opencode/mimo-v2.5-free', modeId: null, approve: false },
+  );
+});
+
+test('acpSessionOptions maps hermes tiers to session modes', () => {
+  // yolo is the default tier: auto-approve, and the matching hermes mode.
+  assert.deepEqual(acpSessionOptions('hermes', {}), {
+    modelId: null,
+    modeId: 'dont_ask',
+    approve: true,
+  });
+  assert.deepEqual(acpSessionOptions('hermes', { permission: 'cautious' }), {
+    modelId: null,
+    modeId: 'default',
+    approve: false,
+  });
+});
+
+test('acpSessionOptions translates a pinned hermes model id to ACP form', () => {
+  // Hermes has no built-in catalog, so models-extra.json is the only way to
+  // pin one — and it is written in the CLI's `provider/model` form.
+  const extraFile = path.join(__dirname, '..', 'models-extra.json');
+  const had = fs.existsSync(extraFile);
+  const backup = had ? fs.readFileSync(extraFile) : null;
+  try {
+    fs.writeFileSync(
+      extraFile,
+      JSON.stringify({ hermes: [{ id: 'anthropic/claude-sonnet-4' }] }),
+    );
+    assert.equal(
+      acpSessionOptions('hermes', { model: 'anthropic/claude-sonnet-4' }).modelId,
+      'anthropic:claude-sonnet-4',
+    );
+  } finally {
+    if (had) fs.writeFileSync(extraFile, backup);
+    else fs.rmSync(extraFile, { force: true });
+  }
+  // opencode ids are already ACP ids and must not be rewritten.
+  assert.equal(
+    acpSessionOptions('opencode', { model: 'opencode/big-pickle' }).modelId,
+    'opencode/big-pickle',
+  );
+});
+
 // --- normalizeSettings ------------------------------------------------------
 
 test('normalizeSettings keeps valid ids and repairs invalid ones to defaults', () => {
@@ -144,11 +191,17 @@ test('normalizeSettings keeps valid ids and repairs invalid ones to defaults', (
   );
 });
 
-test('normalizeSettings keeps agy model and drops unsupported effort', () => {
-  const out = normalizeSettings('agy', { model: 'whatever', permission: 'sandbox' });
-  assert.equal(out.model, 'gemini-3-5-flash-medium');
+test('normalizeSettings drops groups an agent does not support', () => {
+  // Hermes pins its model in host config and has no reasoning-effort flag, so
+  // only the permission tier survives normalization.
+  const out = normalizeSettings('hermes', {
+    model: 'whatever',
+    effort: 'high',
+    permission: 'yolo',
+  });
+  assert.equal('model' in out, false);
   assert.equal('effort' in out, false);
-  assert.equal(out.permission, 'sandbox');
+  assert.equal(out.permission, 'yolo');
 });
 
 // --- describeAgent ----------------------------------------------------------
@@ -169,9 +222,9 @@ test('describeAgent advertises supported groups and strips internal args', () =>
     }
   }
 
-  const agy = describeAgent('agy');
-  assert.deepEqual(agy.supports, {
-    model: true,
+  const hermes = describeAgent('hermes');
+  assert.deepEqual(hermes.supports, {
+    model: false,
     effort: false,
     permission: true,
     fast: false,
@@ -186,5 +239,5 @@ test('fast mode is explicit and limited to Claude Code and Codex', () => {
   assert.deepEqual(codexOn.slice(-2), ['-c', 'service_tier="fast"']);
   const codexOff = buildArgs('codex', { fast: 'off' });
   assert.deepEqual(codexOff.slice(-2), ['-c', 'service_tier="default"']);
-  assert.equal(normalizeSettings('agy', { fast: 'on' }).fast, undefined);
+  assert.equal(normalizeSettings('opencode', { fast: 'on' }).fast, undefined);
 });

@@ -11,7 +11,7 @@ module.exports = function createChatRouter(ctx) {
     agentTurnDependencies,
     broadcastScope,
     clearHistory,
-    clearSession,
+    purgeSession,
     createChatResponder,
     finalizeStaleStreamingHistory,
     getAgent,
@@ -246,7 +246,7 @@ module.exports = function createChatRouter(ctx) {
 
   // Clear one chat session's history plus resumable CLI session so the next message
   // starts a new machine-side conversation. This does not touch files on disk.
-  router.post('/api/session/clear', (req, res) => {
+  router.post('/api/session/clear', async (req, res) => {
     const agentKey = String(req.body.agent || '').trim();
     const requestedSessionId = String(req.body.sessionId || '').trim();
     let workdir;
@@ -275,13 +275,19 @@ module.exports = function createChatRouter(ctx) {
           code: 'SESSION_BUSY',
         });
       }
-      const cleared = clearSession(scopeKey);
+      const cleared = await purgeSession(scopeKey, {
+        agentKey: agent.key,
+        workdir,
+      });
       clearHistory(scopeKey);
       // Drop the /btw side chat derived from this session too (scope agent
       // `btw:<agent>`, keyed by the same session id) so it never outlives the
       // main conversation it forked from. No-op for agents without a side chat.
       const btwScopeKey = scopeKeyFor(`btw:${agent.key}`, workdir, chatSession.id);
-      clearSession(btwScopeKey);
+      await purgeSession(btwScopeKey, {
+        agentKey: `btw:${agent.key}`,
+        workdir,
+      });
       clearHistory(btwScopeKey);
       touchChatSession(contextKey, chatSession.id);
       return res.json({
@@ -297,11 +303,16 @@ module.exports = function createChatRouter(ctx) {
       const contextKey = sessionContextKeyFor(agent.key, workdir);
       for (const chatSession of listChatSessions(contextKey).sessions) {
         const scopeKey = scopeKeyFor(agent.key, workdir, chatSession.id);
-        if (clearSession(scopeKey)) cleared += 1;
+        if (await purgeSession(scopeKey, { agentKey: agent.key, workdir })) {
+          cleared += 1;
+        }
         clearHistory(scopeKey);
         // Also clear the derived /btw side chat (see single-session path above).
         const btwScopeKey = scopeKeyFor(`btw:${agent.key}`, workdir, chatSession.id);
-        clearSession(btwScopeKey);
+        await purgeSession(btwScopeKey, {
+          agentKey: `btw:${agent.key}`,
+          workdir,
+        });
         clearHistory(btwScopeKey);
       }
     }

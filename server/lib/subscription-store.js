@@ -93,6 +93,7 @@ function createSubscriptionStore({ filePath, key, send, isGone }) {
     messageZh,
     scopeWorkdir,
     category,
+    tag,
   }) {
     const list = loadRecords();
     if (list.length === 0) return 0;
@@ -111,7 +112,13 @@ function createSubscriptionStore({ filePath, key, send, isGone }) {
         const body = pickLang(record, message, messageZh, '');
         const notificationTitle = pickLang(record, title, titleZh, 'Relay');
         try {
-          await send(record, { title: notificationTitle, body, tag: 'relay' });
+          // The tag lets a client collapse this alert with its own copy of the
+          // same event instead of showing both.
+          await send(record, {
+            title: notificationTitle,
+            body,
+            tag: tag || 'relay',
+          });
           sent += 1;
         } catch (err) {
           if (isGone(err)) gone.push(idOf(record));

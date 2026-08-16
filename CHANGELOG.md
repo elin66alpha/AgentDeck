@@ -2,6 +2,17 @@
 
 ## 0.1.5 - 2026-07-27
 
+### Removed
+
+- Antigravity (`agy`) support. The CLI agent list is now Claude Code, Codex,
+  OpenCode, and Hermes, and the usage screen reports Claude Code and Codex only.
+  This drops the agy runner, BTW conversation cloning, model discovery, OAuth
+  login, and the local language-server quota probe, along with
+  `AGY_QUOTA_PROBE_TIMEOUT_MS`.
+- The browser-only OAuth login mode (`authMode` / `requiresCode` on the login
+  SSE stream), which existed solely for Antigravity. Every remaining OAuth agent
+  uses the device-code flow.
+
 ### Added
 
 - The backend keeps Claude's five-hour quota window cycling with one minimal
@@ -16,6 +27,54 @@
 
 ### Changed
 
+- Claude Code now runs as a persistent session instead of one process per turn.
+  A chat keeps a single CLI process alive between messages, the way a terminal
+  session does, so follow-up turns skip the cold start (roughly 3.1s to 1.5s in
+  local measurement) and anything started in the background — watchers, servers,
+  long-running tasks — is still running on the next turn instead of being killed
+  the moment the turn ends. Cancelling a turn now interrupts it rather than
+  killing the process, so the conversation survives a cancel.
+
+  Live processes cost about 300 MB each, so an idle chat's process is closed
+  after `RELAY_CLAUDE_IDLE_MS` (default 15 minutes) and at most
+  `RELAY_CLAUDE_MAX_LIVE` (default 3) exist at once; a chat whose process was
+  closed resumes into the same conversation on its next turn. `RELAY_CLAUDE_BIN`
+  overrides which `claude` binary is driven.
+- OpenCode, Hermes and Codex now run as persistent sessions too, over their
+  stdio JSON-RPC servers — `acp` for the first two (Agent Client Protocol),
+  `app-server` for Codex — with the same gains: follow-up turns skip the cold
+  start (3.9s to 1.4s for opencode, 5.2s to 1.2s for hermes, 3.7s to 1.4s for
+  codex in local measurement), and cancelling interrupts the turn instead of
+  killing the conversation. Replies now stream token by token for opencode and
+  hermes as well — the old opencode path could only stream whole JSON lines and
+  hermes could not stream at all — and changing the model, reasoning effort or
+  permission tier applies to the live session without restarting anything.
+  No agent runs one process per turn any more.
+
+  Unlike Claude, one process per agent hosts *every* chat for it, because these
+  protocols give each session its own work tree. That pays the CLI's startup
+  cost (~360 MB for opencode, ~90 MB for hermes) once instead of once per chat.
+  Idle sessions are closed after `RELAY_AGENT_IDLE_MS` (default 15 minutes), at
+  most `RELAY_AGENT_MAX_SESSIONS` (default 4) are live per agent, and the process
+  exits with its last session; a chat whose session was closed reloads into the
+  same conversation on its next turn.
+
+  Approval prompts now reach Relay directly. Until there is an approval UI, the
+  "Bypass" / "Auto-approve (yolo)" tiers approve them and the "Ask" / "Cautious"
+  tiers refuse — deterministic, where the old non-interactive runs could stall.
+
+  Background work started by a turn now outlives it for Claude, OpenCode and
+  Hermes. Codex is the exception: its sandbox kills the process group of each
+  command as that command returns, so background work there survives only if it
+  detaches into its own session (`setsid`).
+- Codex's /btw side chat now branches the conversation with the CLI's own
+  `thread/fork` instead of copying rows and rollout files inside codex's private
+  SQLite state, which removes about 180 lines of version-specific surgery
+  against `~/.codex/state_5.sqlite`.
+- Deleting a chat session, clearing it, or resetting its /btw side chat now
+  deletes the CLI-side transcript as well, so a deleted conversation can no
+  longer be resumed and no longer lingers on disk. This now covers all four
+  agents.
 - `server/.env.example` documents the remaining supported settings, including
   the state-file overrides and the keepalive retry interval.
 - The denylist that protects `tokens.json` now follows `RELAY_TOKENS_FILE`

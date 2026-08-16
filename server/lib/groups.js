@@ -41,7 +41,7 @@ function normalizeName(value, fallback) {
   return (text || fallback).slice(0, 80);
 }
 
-// Members are agent keys (claude, codex, agy, ...). Dedupe, keep order, cap the
+// Members are agent keys (claude, codex, opencode, ...). Dedupe, keep order, cap the
 // count, and reject anything that isn't a plausible agent key so a member can
 // never inject a separator into a derived scope key.
 function normalizeMembers(members) {
