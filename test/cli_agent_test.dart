@@ -1,9 +1,8 @@
-import 'dart:async';
-
 import 'package:flutter_test/flutter_test.dart';
-import 'package:relay/core/backend/backend_client.dart';
+import 'package:relay/core/i18n/app_strings.dart';
+import 'package:relay/core/settings/app_settings_controller.dart';
 import 'package:relay/core/models/cli_agent.dart';
-import 'package:relay/features/machines/agent_login_flow_controller.dart';
+import 'package:relay/features/cli_agents/agent_status_lights.dart';
 
 void main() {
   test('parses agent status fields from backend payload', () {
@@ -86,80 +85,82 @@ void main() {
     expect(isCliAgentSelectable(ready), true);
   });
 
-  test('agent login flow tracks URL, submitted code, and completion', () async {
-    final StreamController<BackendEvent> events =
-        StreamController<BackendEvent>();
-    String? submittedSessionId;
-    String? submittedCode;
-    final AgentLoginFlowController controller = AgentLoginFlowController(
-      startLogin: (_) => events.stream,
-      submitCode: (String sessionId, String code) async {
-        submittedSessionId = sessionId;
-        submittedCode = code;
-      },
-    );
-    addTearDown(() async {
-      controller.dispose();
-      await events.close();
+  test('reads the credential expiry from the backend payload', () {
+    final CliAgent agent = CliAgent.fromJson(<String, Object?>{
+      'key': 'claude',
+      'label': 'Claude Code',
+      'description': 'Anthropic Claude Code CLI',
+      'credentialExpiresAt': 1893456000000,
+    });
+    final CliAgent legacy = CliAgent.fromJson(<String, Object?>{
+      'key': 'codex',
+      'label': 'Codex',
+      'description': 'OpenAI Codex CLI',
     });
 
-    await controller.start('codex');
-    events.add(
-      const BackendEvent(
-        type: 'login_started',
-        data: <String, Object?>{'sessionId': 's1', 'agent': 'codex'},
-      ),
+    expect(
+      agent.credentialExpiresAt,
+      DateTime.fromMillisecondsSinceEpoch(1893456000000),
     );
-    await pumpEventQueue();
-
-    expect(controller.phase, AgentLoginPhase.waitingForUrl);
-    expect(controller.sessionId, 's1');
-
-    events.add(
-      const BackendEvent(
-        type: 'login_url',
-        data: <String, Object?>{
-          'sessionId': 's1',
-          'agent': 'codex',
-          'url': 'https://example.test/login',
-        },
-      ),
-    );
-    await pumpEventQueue();
-
-    expect(controller.phase, AgentLoginPhase.readyForCode);
-    expect(controller.url, 'https://example.test/login');
-
-    await controller.submitCode('  abc123  ');
-
-    expect(controller.phase, AgentLoginPhase.submitting);
-    expect(submittedSessionId, 's1');
-    expect(submittedCode, 'abc123');
-
-    events.add(
-      const BackendEvent(
-        type: 'login_done',
-        data: <String, Object?>{'sessionId': 's1', 'agent': 'codex'},
-      ),
-    );
-    await pumpEventQueue();
-
-    expect(controller.phase, AgentLoginPhase.done);
+    expect(legacy.credentialExpiresAt, isNull);
   });
 
-  test('agent login flow surfaces stream errors', () async {
-    final AgentLoginFlowController controller = AgentLoginFlowController(
-      startLogin: (_) => Stream<BackendEvent>.error(
-        BackendException('could not start'),
+  test('counts whole days on both sides of the credential expiry', () {
+    final DateTime now = DateTime(2026, 8, 16, 12);
+    CredentialExpiry expiryAfter(Duration offset) =>
+        CredentialExpiry.at(now.add(offset), now: now);
+
+    expect(expiryAfter(const Duration(days: 7)).days, 7);
+    expect(expiryAfter(const Duration(days: 7)).expired, false);
+    // Truncates, so a day and a half of runway still reads as one full day.
+    expect(expiryAfter(const Duration(days: 1, hours: 12)).days, 1);
+    expect(expiryAfter(const Duration(hours: 3)).days, 0);
+    expect(expiryAfter(const Duration(hours: 3)).expired, false);
+    expect(expiryAfter(const Duration(hours: -3)).expired, true);
+    expect(expiryAfter(const Duration(hours: -3)).days, 0);
+    expect(expiryAfter(const Duration(days: -3, hours: -1)).days, 3);
+    expect(expiryAfter(const Duration(days: -3, hours: -1)).expired, true);
+  });
+
+  test('describes the expiry only for agents that report one', () {
+    const AppStrings strings = AppStrings(AppLanguage.en);
+    final DateTime now = DateTime(2026, 8, 16, 12);
+    CliAgent claudeExpiring(Duration offset) => CliAgent(
+          key: 'claude',
+          label: 'Claude Code',
+          description: 'Anthropic Claude Code CLI',
+          authKind: 'oauth',
+          credentialExpiresAt: now.add(offset),
+        );
+
+    expect(
+      agentCredentialExpiryMessage(
+        strings,
+        claudeExpiring(const Duration(days: 12)),
+        now: now,
       ),
-      submitCode: (_, __) async {},
+      'Log in again in 12 days',
     );
-    addTearDown(controller.dispose);
-
-    await controller.start('claude');
-    await pumpEventQueue();
-
-    expect(controller.phase, AgentLoginPhase.error);
-    expect(controller.error, 'could not start');
+    expect(
+      agentCredentialExpiryMessage(
+        strings,
+        claudeExpiring(const Duration(days: -2)),
+        now: now,
+      ),
+      'Expired 2 days ago. Log in again on the backend host.',
+    );
+    expect(
+      agentCredentialExpiryMessage(
+        strings,
+        const CliAgent(
+          key: 'opencode',
+          label: 'OpenCode',
+          description: 'OpenCode CLI',
+          authKind: 'apiKeyOptional',
+        ),
+        now: now,
+      ),
+      isNull,
+    );
   });
 }

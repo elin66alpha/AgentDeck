@@ -15,8 +15,18 @@ before(async () => {
     createMetaRouter({
       DEFAULT_AGENT: 'claude',
       getAgentStatuses: () => ({
-        claude: { installed: true, authed: true, authKind: 'oauth' },
-        codex: { installed: true, authed: false, authKind: 'oauth' },
+        claude: {
+          installed: true,
+          authed: true,
+          authKind: 'oauth',
+          credentialExpiresAt: 1893456000000,
+        },
+        codex: {
+          installed: true,
+          authed: false,
+          authKind: 'oauth',
+          credentialExpiresAt: null,
+        },
         opencode: {
           installed: true,
           authed: true,
@@ -66,6 +76,7 @@ test('/api/agents returns every agent with install/auth usability fields', async
       authed: byKey.claude.authed,
       authKind: byKey.claude.authKind,
       usable: byKey.claude.usable,
+      credentialExpiresAt: byKey.claude.credentialExpiresAt,
     },
     {
       key: 'claude',
@@ -75,9 +86,12 @@ test('/api/agents returns every agent with install/auth usability fields', async
       authed: true,
       authKind: 'oauth',
       usable: true,
+      credentialExpiresAt: 1893456000000,
     },
   );
   assert.equal(byKey.codex.usable, false);
+  assert.equal(byKey.codex.credentialExpiresAt, null);
+  assert.equal(byKey.opencode.credentialExpiresAt, null);
   assert.equal(byKey.opencode.usable, true);
   assert.equal(byKey.hermes.authKind, 'apiKey');
   // hermes is managed out-of-band, so it is usable once installed even with no

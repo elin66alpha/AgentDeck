@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/backend/backend_client.dart';
@@ -18,18 +20,46 @@ class QuotaUsageScreen extends StatefulWidget {
 }
 
 class _QuotaUsageScreenState extends State<QuotaUsageScreen> {
-  late Future<UsageReport> _usageFuture;
+  // Seeded from the last report the app fetched, so reopening the screen shows
+  // the previous numbers at once. The refresh below then replaces them; a query
+  // that reaches Anthropic and OpenAI is too slow to hold an empty screen for.
+  UsageReport? _report;
+  String? _error;
+  bool _loading = false;
 
   @override
   void initState() {
     super.initState();
-    _usageFuture = widget.chatController.usageReport();
+    _report = widget.chatController.lastUsageReport;
+    unawaited(_refresh());
   }
 
-  void _refresh() {
+  Future<void> _refresh() async {
+    if (_loading) return;
     setState(() {
-      _usageFuture = widget.chatController.usageReport();
+      _loading = true;
+      _error = null;
     });
+    try {
+      final UsageReport report = await widget.chatController.usageReport();
+      if (!mounted) return;
+      setState(() {
+        _report = report;
+        _loading = false;
+      });
+    } catch (err) {
+      if (!mounted) return;
+      setState(() {
+        _error = err.toString();
+        _loading = false;
+      });
+      // With numbers already on screen the failure would otherwise be silent.
+      if (_report != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_error!)),
+        );
+      }
+    }
   }
 
   @override
@@ -37,70 +67,65 @@ class _QuotaUsageScreenState extends State<QuotaUsageScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(context.l10n.usageQuery),
+        bottom: _loading
+            ? const PreferredSize(
+                preferredSize: Size.fromHeight(2),
+                child: LinearProgressIndicator(minHeight: 2),
+              )
+            : null,
         actions: <Widget>[
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             tooltip: context.l10n.refresh,
-            onPressed: _refresh,
+            onPressed: _loading ? null : () => unawaited(_refresh()),
           ),
         ],
       ),
-      body: SafeArea(
-        child: FutureBuilder<UsageReport>(
-          future: _usageFuture,
-          builder: (
-            BuildContext context,
-            AsyncSnapshot<UsageReport> snapshot,
-          ) {
-            if (snapshot.connectionState != ConnectionState.done) {
-              return Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    const CircularProgressIndicator(),
-                    const SizedBox(height: 12),
-                    Text(context.l10n.loadingUsage),
-                  ],
-                ),
-              );
-            }
-            if (snapshot.hasError) {
-              return Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Text(
-                    snapshot.error.toString(),
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                    ),
-                  ),
-                ),
-              );
-            }
-            final UsageReport report = snapshot.data!;
-            return RefreshIndicator(
-              onRefresh: () async {
-                _refresh();
-                await _usageFuture;
-              },
-              child: ListView.separated(
-                padding: const EdgeInsets.all(16),
-                itemCount: report.agents.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 12),
-                itemBuilder: (BuildContext context, int index) {
-                  return Align(
-                    alignment: Alignment.topCenter,
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 760),
-                      child: _UsageAgentPanel(agent: report.agents[index]),
-                    ),
-                  );
-                },
-              ),
-            );
-          },
+      body: SafeArea(child: _buildBody(context)),
+    );
+  }
+
+  Widget _buildBody(BuildContext context) {
+    final UsageReport? report = _report;
+    if (report == null) {
+      if (_error != null) {
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text(
+              _error!,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ),
+        );
+      }
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            const CircularProgressIndicator(),
+            const SizedBox(height: 12),
+            Text(context.l10n.loadingUsage),
+          ],
         ),
+      );
+    }
+    return RefreshIndicator(
+      onRefresh: _refresh,
+      child: ListView.separated(
+        padding: const EdgeInsets.all(16),
+        itemCount: report.agents.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 12),
+        itemBuilder: (BuildContext context, int index) {
+          return Align(
+            alignment: Alignment.topCenter,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 760),
+              child: _UsageAgentPanel(agent: report.agents[index]),
+            ),
+          );
+        },
       ),
     );
   }

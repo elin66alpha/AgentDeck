@@ -57,17 +57,17 @@ Implemented controls include:
 - token revocation and deletion;
 - a 600-request/minute/IP limit for ordinary API requests;
 - a separate 15-failed-auth-attempt/minute/IP limit;
-- streaming chat/SSE/login and file-transfer routes excluded from the general
+- streaming chat/SSE and file-transfer routes excluded from the general
   request counter while still requiring authentication;
 - `trust proxy` restricted to loopback so a direct client cannot spoof
   `X-Forwarded-For`;
 - a startup warning when a routable public URL uses plaintext HTTP.
 
-The in-app Claude/Codex login bridge starts the real CLI in a backend PTY.
-It returns authorization URLs and status only, redacts URLs from diagnostic
-output, and never returns stored OAuth tokens. The bridge currently depends on
-GNU-compatible `script -qfec`; log in directly on hosts without it. OpenCode and
-Hermes keys are managed outside Relay on the backend host.
+Relay never logs a CLI agent in. Every agent's credential is created on the
+backend host with that CLI's own login command or provider key. Relay reads the
+credential files only to report whether an agent is authenticated and, for
+Claude Code and Codex, when the stored OAuth credential expires. Neither the
+API nor the app ever receives a token value.
 
 ## SSH terminal
 

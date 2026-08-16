@@ -14,6 +14,7 @@ import '../../core/notifications/notification_service.dart';
 import '../../core/notifications/web_push.dart';
 import '../../core/settings/app_settings_controller.dart';
 import '../../core/util/error_text.dart';
+import 'agent_controls.dart';
 import 'background_turn_registry.dart';
 
 class BotChatController extends ChangeNotifier {
@@ -344,6 +345,9 @@ class BotChatController extends ChangeNotifier {
       _clearSessionLists();
       _clearBackgroundTurns();
       _pendingDrafts.clear();
+      // Another host can have different CLIs, versions, and quota.
+      clearAgentOptionsCache();
+      _lastUsageReport = null;
     }
     if (sameContext && activeSessionId != null) {
       notifyListeners();
@@ -525,7 +529,19 @@ class BotChatController extends ChangeNotifier {
     }
   }
 
-  Future<UsageReport> usageReport() => _backendClient.usageReport();
+  UsageReport? _lastUsageReport;
+
+  /// The most recent quota report, kept so the usage and scheduler screens can
+  /// paint the previous numbers immediately instead of holding a spinner for a
+  /// round trip that reaches Anthropic and OpenAI. Cleared on a machine switch,
+  /// since quota belongs to the host's credentials.
+  UsageReport? get lastUsageReport => _lastUsageReport;
+
+  Future<UsageReport> usageReport() async {
+    final UsageReport report = await _backendClient.usageReport();
+    _lastUsageReport = report;
+    return report;
+  }
 
   // Registers this browser for Web Push so quota/scheduled-message alerts arrive
   // even when the tab is closed. Web-only and best-effort: a no-op off the web,

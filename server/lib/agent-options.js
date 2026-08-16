@@ -247,17 +247,38 @@ function defaultsFor(agentKey) {
 
 const EXTRA_MODELS_FILE = path.join(__dirname, '..', 'models-extra.json');
 
+// Parsed models-extra.json, re-read only when the file's mtime/size changes.
+// modelsFor runs on every turn and every option-picker open, so the common case
+// (no such file) must not cost a failing read each time.
+let extraModelsCache = { stamp: null, value: null };
+
+function readExtraModels() {
+  let stamp = '';
+  try {
+    const stat = fs.statSync(EXTRA_MODELS_FILE);
+    stamp = `${stat.size}:${stat.mtimeMs}`;
+  } catch (_err) {
+    stamp = '';
+  }
+  if (extraModelsCache.stamp === stamp) return extraModelsCache.value;
+  let value = null;
+  if (stamp) {
+    try {
+      value = JSON.parse(fs.readFileSync(EXTRA_MODELS_FILE, 'utf-8'));
+    } catch (_err) {
+      value = null;
+    }
+  }
+  extraModelsCache = { stamp, value };
+  return value;
+}
+
 // Merge user-supplied pinned models from models-extra.json on top of the base
 // catalog. Entries are appended (deduped by id); a brand-new model becomes
 // selectable by editing that file alone, no redeploy. Malformed files are
 // ignored so a typo never breaks the options endpoint.
 function mergeExtraModels(agentKey, base) {
-  let extra;
-  try {
-    extra = JSON.parse(fs.readFileSync(EXTRA_MODELS_FILE, 'utf-8'));
-  } catch (_err) {
-    return base;
-  }
+  const extra = readExtraModels();
   const list = extra && Array.isArray(extra[agentKey]) ? extra[agentKey] : null;
   if (!list) return base;
   const seen = new Set(base.map((m) => m.id));

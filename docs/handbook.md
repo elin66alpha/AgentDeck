@@ -28,8 +28,7 @@ the backend OS user. A stable deployment should have all of the following:
 ### Reverse proxy requirements
 
 - Forward normal HTTP requests and long-lived SSE responses. Disable buffering
-  for `/api/events`, `/api/chat`, `/api/group/chat`, and
-  `/api/agent-auth/login/start`.
+  for `/api/events`, `/api/chat`, and `/api/group/chat`.
 - Forward `Upgrade`/`Connection` headers for the WebSocket endpoint
   `/api/terminal/connect`. Do not log its one-time `ticket` query value.
 - Keep proxy timeouts above `AGENT_TIMEOUT_MS` (60 minutes by default).
@@ -82,12 +81,17 @@ subject to browser-origin storage security, so use a private profile on a
 trusted device.
 
 Relay reports separate installed, authenticated, and usable state for all four
-known agents. Claude Code and Codex are OAuth-gated. Their in-app login bridge
-starts the CLI in a PTY, streams the authorization URL, and accepts a device
-code. The bridge currently depends on GNU-compatible
-`script -qfec` (normally Linux); on unsupported hosts, log in directly in a
-terminal. OpenCode and Hermes credentials remain host-managed; once installed,
-Relay allows their runner to start and lets the CLI report provider errors.
+known agents. Every agent's credential is created on the backend host: Claude
+Code and Codex with their own `claude auth login` / `codex login`, OpenCode and
+Hermes with a provider key. Relay never logs a CLI in remotely.
+
+For the two OAuth agents it also reads the expiry stored beside those
+credentials — `claudeAiOauth.expiresAt` in `~/.claude/.credentials.json`, and
+the `exp` claim of the `id_token` in `~/.codex/auth.json` — and reports it as
+`credentialExpiresAt` (epoch ms) on `/api/agents`. The app turns that into the
+days left, or the days since expiry, on the **Manage credentials** screen. Only
+the timestamp is read; token values never leave the backend. Agents whose
+credential carries no expiry report `null` and show no countdown.
 
 ## SSH terminal
 
@@ -192,6 +196,15 @@ When a human message mentions multiple members, Relay snapshots the transcript
 once, builds a speaker-labelled delta for each member, and runs those members in
 parallel. Each member still serializes against its own private Swarm session.
 
+Members can summon each other. A member's prompt lists the other members and the
+`@name` that reaches each, and any of those names in its reply hands them the
+floor: the round continues with another wave, snapshotted after the previous
+replies so the newly summoned members see them. `RELAY_SWARM_MAX_HOPS` bounds how
+many agent-driven waves follow the human's message (default 3; set 0 to keep
+summoning human-only), because two members that keep naming each other would
+otherwise run — and bill — without end. A member cannot summon itself, and a
+turn that failed or was cancelled summons no one.
+
 At creation, a Swarm selects its work tree and per-member model, effort,
 permission, nickname, and prompt/persona. The work tree cannot be changed later.
 Swarms can be cleared, updated, deleted, or saved as reusable JSON templates.
@@ -229,9 +242,6 @@ WebSocket upgrade requires the short-lived ticket created by its HTTP endpoint.
 
 - Metadata/auth: health, agents, agent options/settings/version/update,
   auth status, diagnostics, device tokens, and shared events.
-- Agent OAuth: `GET /api/agent-auth/login/start`,
-  `POST /api/agent-auth/login/code`, and
-  `GET /api/agent-auth/login/status`.
 - Chat: chat, cancellation, history, history search/export, and clear session.
 - Named sessions: list/create, set active, and delete.
 - Files/workdir: current workdir, absolute directory browse, upload, and
@@ -309,6 +319,7 @@ groups are:
   idle/buffer limits;
 - agent sessions: `RELAY_CLAUDE_IDLE_MS`, `RELAY_CLAUDE_MAX_LIVE`,
   `RELAY_CLAUDE_BIN`, `RELAY_AGENT_IDLE_MS`, `RELAY_AGENT_MAX_SESSIONS`;
+- Swarms: `RELAY_SWARM_MAX_HOPS`;
 - security/files: `CORS_ALLOW_ORIGIN`, `RELAY_FS_ROOTS`, upload/download caps;
 - usage: quota watch, poll interval, HTTP/probe timeouts and backoff;
 - offline push: VAPID keys and `FCM_SERVICE_ACCOUNT_FILE`.

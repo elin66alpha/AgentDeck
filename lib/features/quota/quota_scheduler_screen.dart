@@ -35,6 +35,9 @@ class _QuotaSchedulerScreenState extends State<QuotaSchedulerScreen> {
   void initState() {
     super.initState();
     _seenScheduleRevision = widget.chatController.quotaScheduleRevision;
+    // Show the last known quota straight away; _load replaces it once the fresh
+    // report arrives from the usage APIs.
+    _usage = widget.chatController.lastUsageReport;
     widget.chatController.addListener(_onControllerChanged);
     unawaited(_load());
   }

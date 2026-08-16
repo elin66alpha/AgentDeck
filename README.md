@@ -34,9 +34,10 @@ flowchart LR
   agent starts in the background is still running on the next turn.
 - **Named conversations.** Each workdir and agent supports up to eight persistent
   sessions with shared cross-device history and running-state indicators.
-- **Agent status and login.** See installed/authenticated state for all four
-  agents. Relay can bridge Claude and Codex OAuth on compatible backend hosts;
-  OpenCode and Hermes credentials stay host-managed.
+- **Agent status and credential expiry.** See installed/authenticated state for
+  all four agents, plus how many days are left on the Claude Code and Codex
+  OAuth credentials before you have to log in again on the backend host. All
+  four agents' credentials stay host-managed.
 - **Per-agent controls.** Select model, reasoning effort, and permissions in the
   composer. Claude Code and Codex also have a Fast mode switch, off by default;
   fast responses may consume more quota or cost more.
@@ -44,8 +45,10 @@ flowchart LR
   supported reasoning levels from the installed Codex CLI, with safe fallbacks.
 - **Swarms.** Put several agents in one transcript, give each member a work tree,
   model, effort, permission, nickname, and persona, then summon members with
-  `@mentions`. Multiple members run in parallel from one transcript snapshot.
-  Swarms can be saved and imported as JSON templates.
+  `@mentions`. Multiple members run in parallel from one transcript snapshot, and
+  members can hand the floor to each other by `@mentioning` a teammate in their
+  own reply — bounded so a pair cannot loop forever. Swarms can be saved and
+  imported as JSON templates.
 - **Remote files.** Browse absolute paths allowed by the backend, change the
   workdir, upload files, and download files or zipped folders.
 - **SSH terminal.** Open **Manage credentials → Enter SSH** for one resumable

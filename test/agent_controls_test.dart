@@ -7,10 +7,15 @@ import 'package:relay/core/settings/app_settings_controller.dart';
 import 'package:relay/features/chat/agent_controls.dart';
 
 void main() {
+  // The catalog cache outlives a widget on purpose, so each test starts from a
+  // cold one instead of inheriting the previous test's fetch.
+  setUp(clearAgentOptionsCache);
+
   Future<void> pumpControls(
     WidgetTester tester,
-    _OptionsBackendClient backend,
-  ) async {
+    _OptionsBackendClient backend, {
+    bool settle = true,
+  }) async {
     final AppSettingsController settings = AppSettingsController();
     addTearDown(settings.dispose);
     addTearDown(backend.close);
@@ -27,7 +32,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    if (settle) await tester.pumpAndSettle();
   }
 
   testWidgets('effort page filters choices by the selected model', (
@@ -86,7 +91,7 @@ void main() {
     expect(backend.settingsFetches, 1);
   });
 
-  testWidgets('returning from an option page reloads the parent controls', (
+  testWidgets('returning from an option page adopts the saved selection', (
     WidgetTester tester,
   ) async {
     final _OptionsBackendClient backend = _OptionsBackendClient();
@@ -94,12 +99,37 @@ void main() {
 
     await tester.tap(find.text('Model'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('GPT New'));
+    await tester.tap(find.text('GPT Lite'));
     await tester.pumpAndSettle();
 
+    // The page already returned the saved settings, so the controls take them
+    // as-is instead of refetching the catalog and the settings again.
     expect(backend.settingUpdates, 1);
-    expect(backend.optionsFetches, 2);
-    expect(backend.settingsFetches, 2);
+    expect(backend.optionsFetches, 1);
+    expect(backend.settingsFetches, 1);
+
+    // Reopening shows the new selection, which is what the refetch was for.
+    await tester.tap(find.text('Model'));
+    await tester.pumpAndSettle();
+    final ListTile lite = tester.widget<ListTile>(
+      find.widgetWithText(ListTile, 'GPT Lite'),
+    );
+    expect((lite.leading! as Icon).icon, Icons.radio_button_checked_rounded);
+  });
+
+  testWidgets('a cached catalog renders the controls without a spinner', (
+    WidgetTester tester,
+  ) async {
+    await pumpControls(tester, _OptionsBackendClient());
+    // Unmount, then mount again: what happens every time the composer's action
+    // panel closes and reopens.
+    await tester.pumpWidget(const SizedBox.shrink());
+    await pumpControls(tester, _OptionsBackendClient(), settle: false);
+
+    // First frame, before the refresh lands: buttons already at final size.
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(find.text('Model'), findsOneWidget);
+    await tester.pumpAndSettle();
   });
 
   testWidgets('fast switch updates the Codex fast setting', (

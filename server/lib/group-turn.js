@@ -94,23 +94,39 @@ function lineFor(message, labelFor) {
 }
 
 // Build the prompt handed to the agent taking the floor: a header that states it
-// is in a group and it is now its turn, an optional `persona` line carrying the
-// user's per-member work instructions, then each delta message labeled with its
-// speaker. Bounded to maxBytes by keeping the most recent messages and noting any
-// omission, so a long silence cannot produce a prompt that exceeds the argv cap.
+// is in a group and it is now its turn, the `roster` of members it may summon
+// (already excluding itself; empty when agent-to-agent summoning is off), an
+// optional `persona` line carrying the user's per-member work instructions, then
+// each delta message labeled with its speaker. Bounded to maxBytes by keeping the
+// most recent messages and noting any omission, so a long silence cannot produce
+// a prompt that exceeds the argv cap.
 function buildGroupPrompt({
   selfLabel,
   persona,
   delta,
   labelFor,
+  roster,
   maxBytes = DEFAULT_MAX_PROMPT_BYTES,
 }) {
   const name = String(selfLabel || 'this agent');
   const role = typeof persona === 'string' ? persona.trim() : '';
+  // Summoning only happens if the agent knows it can, and knows the exact token
+  // that resolves. Each entry is `Label (@key)`: the key always parses, while a
+  // nickname only does when it is a single word.
+  const others = (Array.isArray(roster) ? roster : [])
+    .filter((member) => member && member.key)
+    .map((member) => `${member.label || member.key} (@${member.key})`);
+  const rosterLine = others.length
+    ? `\n\nOther members of this swarm: ${others.join(', ')}. ` +
+      'Mentioning one of them by that @name hands them the floor once you ' +
+      'finish, and they will see this exchange. Only do it when you actually ' +
+      'need them; say nothing of the sort to end the exchange.'
+    : '';
   const header =
     `You are "${name}" in a group chat with a human and possibly other AI agents. ` +
     'Each line below is prefixed with its speaker. Reply only as yourself, ' +
     'addressing the conversation; it is now your turn to respond.' +
+    rosterLine +
     (role ? `\n\nYour role in this swarm: ${role}` : '');
   const footer = `(It is now your turn, ${name}.)`;
   const omitted = '[earlier messages omitted]';

@@ -104,7 +104,6 @@ const createQuotaRouter = require('./routes/quota');
 const createPushRouter = require('./routes/push');
 const createMetaRouter = require('./routes/meta');
 const createGroupRouter = require('./routes/group');
-const createAgentAuthRouter = require('./routes/agent-auth');
 const createTerminalRouter = require('./routes/terminal');
 
 const PORT = parseInt(process.env.PORT || '8787', 10);
@@ -161,7 +160,6 @@ function isStreamingApiPath(req) {
     case '/group/chat':
     case '/fs/download':
     case '/fs/upload':
-    case '/agent-auth/login/start':
       return true;
     default:
       return false;
@@ -896,7 +894,6 @@ app.use(createPushRouter(routeContext));
 app.use(createFsRouter(routeContext));
 app.use(createChatRouter(routeContext));
 app.use(createGroupRouter(routeContext));
-app.use(createAgentAuthRouter(routeContext));
 app.use(createSessionsRouter(routeContext));
 app.use(createQuotaRouter(routeContext));
 app.use(createTerminalRouter(routeContext));

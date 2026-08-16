@@ -43,7 +43,7 @@ clients and bundles CanvasKit locally instead of depending on gstatic.
 - `server/server.js`: server configuration, middleware, shared runtime state,
   scheduling, route context, and optional Web static hosting.
 - `server/routes/`: API routers for metadata, push, files, chat, Swarms,
-  agent login, sessions, quota, and the SSH terminal ticket.
+  sessions, quota, and the SSH terminal ticket.
 - `server/lib/`: agent runners, settings/model discovery, persistence, auth,
   filesystem policy, history, quota, push, and orchestration helpers.
 - `backends/`: Linux, macOS, and Windows install/service adapters. Each OS has
@@ -116,11 +116,20 @@ clients and bundles CanvasKit locally instead of depending on gstatic.
 - Codex models and model-specific reasoning levels come from structured CLI
   metadata, with bundled/cache/static fallbacks. Do not reintroduce binary
   string scanning for Codex model ids.
+- `describeAgent` and `getSettings` run on every option-picker open and every
+  turn, so keep them free of subprocesses and per-call file reads.
+  `model-discovery.js` re-locates a CLI at most once a minute and caches the
+  result (including "not installed"); `agent-options.js` caches
+  `models-extra.json` by mtime. A CLI update calls `clearModelDiscoveryCache`,
+  which is what makes new models appear at once.
 - `GET /api/agents` returns all four known agents with install/auth/usability
   state. Claude and Codex require OAuth; OpenCode and Hermes credentials are
   managed on the host and become selectable when installed.
-- The in-app OAuth bridge uses the backend host's `script -qfec` PTY utility.
-  Keep the process output redacted and never return credential values.
+- Every credential is created on the backend host by the CLI itself. Relay does
+  not log an agent in. It reads the credential files in `server/lib/agent-status.js`
+  for auth state and, for Claude and Codex, a `credentialExpiresAt` timestamp so
+  the app can count down to the next login. Read timestamps only; a token value
+  must never reach the API or the app.
 
 ### Backend modules and persistence
 
@@ -155,8 +164,12 @@ clients and bundles CanvasKit locally instead of depending on gstatic.
   always applies the precise sensitive-path denylist and optional
   `RELAY_FS_ROOTS` allowlist in `server/lib/filesystem.js`.
 - A Swarm owns one canonical transcript and private resumable sessions per
-  member. One human message snapshots the transcript once, then mentioned
-  members run in parallel from their own delta prompts.
+  member. A round runs in waves: each wave snapshots the transcript once and
+  runs everyone summoned in it in parallel from their own delta prompts. The
+  human's `@mentions` open wave one; `@mentions` inside a member's reply summon
+  the next wave, bounded by `RELAY_SWARM_MAX_HOPS` (default 3, 0 disables) since
+  two members naming each other would otherwise never stop. A member never
+  summons itself, and a failed or cancelled turn summons no one.
 - Swarm configuration is stored under the workspace that lists it, while its
   chosen work tree is the directory members actually use.
 - The SSH terminal exchanges the bearer credential for a short-lived,

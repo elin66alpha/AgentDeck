@@ -22,9 +22,16 @@ const DISABLED =
   process.env.RELAY_MODEL_DISCOVERY === '0' ||
   process.env.RELAY_MODEL_DISCOVERY === 'false';
 
-// agentKey -> { stamp, models }. models is a non-empty array or null; both are
-// cached so a missing/empty result never re-spawns on every turn.
+// agentKey -> { stamp, models, checkedAt }. models is a non-empty array or null;
+// both are cached so a missing/empty result never re-spawns on every turn.
 const cache = new Map();
+
+// Locating a CLI costs a subprocess (`command -v <bin>`), and the option pickers
+// ask for the catalog on every open, so re-checking the binary per call put a
+// synchronous spawn on a hot path and blocked the event loop for everything
+// else. Look for a new binary at most this often; `clearModelDiscoveryCache`
+// still busts the entry immediately after a CLI update.
+const RECHECK_MS = 60_000;
 
 // Resolve a command name to its real (symlink-followed) absolute path, or null.
 function resolveBinary(command) {
@@ -341,22 +348,38 @@ const STRATEGIES = {
   },
 };
 
+// Identity of everything a discovered catalog depends on: the CLI binary, plus
+// the CLI's own model cache for codex.
+function stampFor(agentKey, bin) {
+  const extra =
+    agentKey === 'codex'
+      ? fileStamp(path.join(codexHome(), 'models_cache.json')) || ''
+      : '';
+  return `${fileStamp(bin) || ''}|${extra}`;
+}
+
 // Discovered model options for an agent, or null to fall back to the static
 // catalog. Cached by binary/cache stamps so CLI and catalog updates refresh it.
 function discoverModels(agentKey) {
   if (DISABLED) return null;
   const strategy = STRATEGIES[agentKey];
   if (!strategy) return null;
+  const now = Date.now();
+  const cached = cache.get(agentKey);
+  if (cached && now - cached.checkedAt < RECHECK_MS) return cached.models;
   try {
     const bin = strategy.locate();
-    if (!bin) return null;
-    const extraStamp =
-      agentKey === 'codex'
-        ? fileStamp(path.join(codexHome(), 'models_cache.json')) || ''
-        : '';
-    const stamp = `${fileStamp(bin) || ''}|${extraStamp}`;
-    const cached = cache.get(agentKey);
-    if (cached && cached.stamp === stamp) return cached.models;
+    if (!bin) {
+      // Remember "not installed" too, so a host without this CLI does not pay a
+      // subprocess on every call just to learn that again.
+      cache.set(agentKey, { stamp: '', models: null, checkedAt: now });
+      return null;
+    }
+    const stamp = stampFor(agentKey, bin);
+    if (cached && cached.stamp === stamp) {
+      cached.checkedAt = now;
+      return cached.models;
+    }
     let models = null;
     try {
       models = strategy.discover(bin);
@@ -364,12 +387,13 @@ function discoverModels(agentKey) {
       models = null;
     }
     const normalized = Array.isArray(models) && models.length ? models : null;
-    const finalExtraStamp =
-      agentKey === 'codex'
-        ? fileStamp(path.join(codexHome(), 'models_cache.json')) || ''
-        : '';
-    const finalStamp = `${fileStamp(bin) || ''}|${finalExtraStamp}`;
-    cache.set(agentKey, { stamp: finalStamp, models: normalized });
+    cache.set(agentKey, {
+      // Discovery can rewrite the CLI's own model cache, so stamp again after it
+      // ran instead of trusting the value read before.
+      stamp: stampFor(agentKey, bin),
+      models: normalized,
+      checkedAt: Date.now(),
+    });
     return normalized;
   } catch (_err) {
     return null;
