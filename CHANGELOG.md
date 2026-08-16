@@ -12,6 +12,10 @@
 - The browser-only OAuth login mode (`authMode` / `requiresCode` on the login
   SSE stream), which existed solely for Antigravity. Every remaining OAuth agent
   uses the device-code flow.
+- BTW side conversations, for Claude Code and Codex alike. This drops the
+  `/api/btw` routes, the side-scope session keys and their transcripts, the
+  BTW button and dialog in the app, and the session-forking each agent needed
+  to support them.
 
 ### Added
 
@@ -67,14 +71,9 @@
   Hermes. Codex is the exception: its sandbox kills the process group of each
   command as that command returns, so background work there survives only if it
   detaches into its own session (`setsid`).
-- Codex's /btw side chat now branches the conversation with the CLI's own
-  `thread/fork` instead of copying rows and rollout files inside codex's private
-  SQLite state, which removes about 180 lines of version-specific surgery
-  against `~/.codex/state_5.sqlite`.
-- Deleting a chat session, clearing it, or resetting its /btw side chat now
-  deletes the CLI-side transcript as well, so a deleted conversation can no
-  longer be resumed and no longer lingers on disk. This now covers all four
-  agents.
+- Deleting or clearing a chat session now deletes the CLI-side transcript as
+  well, so a deleted conversation can no longer be resumed and no longer lingers
+  on disk. This covers all four agents.
 - `server/.env.example` documents the remaining supported settings, including
   the state-file overrides and the keepalive retry interval.
 - The denylist that protects `tokens.json` now follows `RELAY_TOKENS_FILE`

@@ -295,11 +295,9 @@ const SESSION_POOLS = {
 // Delete a scope's conversation for good. Deleting a chat in the app means the
 // conversation is gone, so a pooled scope also loses its CLI-side transcript:
 // without that, the id would be forgotten while the transcript lingered on
-// disk, resumable forever. Other agents just forget the id — their transcripts
-// belong to their own CLIs.
+// disk, resumable forever.
 async function purgeSession(sessionKey, options = {}) {
-  const agentKey = String(options.agentKey || '').replace(/^btw:/, '');
-  const pool = SESSION_POOLS[agentKey];
+  const pool = SESSION_POOLS[String(options.agentKey || '')];
   if (!pool) return clearSession(sessionKey);
   const prior = getSession(sessionKey);
   const cleared = clearSession(sessionKey);
@@ -326,23 +324,12 @@ function shutdownPools() {
   );
 }
 
-// Core Claude invocation shared by the normal chat runner and the /btw sidekick.
-// `resumeId` resumes that session (optionally forked so the original is left
-// untouched); when null a brand-new session is started. The resolved/forked
-// session id is persisted under `sessionKey`.
-function runClaudeInvocation({
-  prompt,
-  onEvent,
-  signal,
-  workdir,
-  settings,
-  sessionKey,
-  resumeId = null,
-  forkSession = false,
-  canRetry = true,
-  retry,
-}) {
+// `resumeId` continues that session; when null a brand-new one is started. The
+// resolved session id is persisted under `sessionKey`.
+function runClaude(prompt, onEvent, sessionKey, signal, workdir, settings) {
   const cwd = workdir || getDefaultWorkdir();
+  const prior = getSession(sessionKey);
+  const resumeId = prior && prior.id ? prior.id : null;
   const resuming = !!resumeId;
   // Resume reuses the saved session ID; a new conversation gets its id from
   // the CLI's first message and persists it once the turn succeeds.
@@ -401,10 +388,8 @@ function runClaudeInvocation({
         error,
       )
     ) {
-      if (canRetry) {
-        if (sessionKey) clearSession(sessionKey);
-        return { __retry: true };
-      }
+      if (sessionKey) clearSession(sessionKey);
+      return { __retry: true };
     }
     if (isAuthError(error)) return { __authError: true };
     return error || '(claude produced no output)';
@@ -420,10 +405,6 @@ function runClaudeInvocation({
       // the wrong configuration and has to be replaced.
       optionsKey: JSON.stringify(sdkOptions),
       resumeId,
-      // Forking branches the conversation into a new session id, inheriting the
-      // original's full memory without writing back to it — this is how /btw asks
-      // a side question without disturbing the main task.
-      forkSession,
       executablePath: claudeExecutablePath(),
       signal,
       onMessage,
@@ -449,67 +430,12 @@ function runClaudeInvocation({
       },
     );
 
-  return finishRun(run, { agentKey: 'claude', onEvent, retry });
-}
-
-function runClaude(prompt, onEvent, sessionKey, signal, workdir, settings) {
-  const prior = getSession(sessionKey);
-  return runClaudeInvocation({
-    prompt,
+  return finishRun(run, {
+    agentKey: 'claude',
     onEvent,
-    signal,
-    workdir,
-    settings,
-    sessionKey,
-    resumeId: prior && prior.id ? prior.id : null,
     retry: () =>
       runClaude(prompt, onEvent, sessionKey, signal, workdir, settings),
   });
-}
-
-// The /btw sidekick: a read-only side question that inherits the main
-// conversation's memory. The first question forks the main Claude session (so it
-// sees everything so far without ever writing back to it); follow-up questions
-// resume that fork so the side chat stays coherent. Permission is forced to the
-// plan (read-only) tier — the sidekick never edits.
-function runBtw(prompt, onEvent, options = {}) {
-  const { mainSessionKey, btwSessionKey, signal, workdir, settings } = options;
-  const readOnlySettings = { ...(settings || {}), permission: 'plan' };
-  const btwPrior = getSession(btwSessionKey);
-  if (btwPrior && btwPrior.id) {
-    return runClaudeInvocation({
-      prompt,
-      onEvent,
-      signal,
-      workdir,
-      settings: readOnlySettings,
-      sessionKey: btwSessionKey,
-      resumeId: btwPrior.id,
-      // If the side fork is gone, clear it and re-fork from the main thread.
-      canRetry: true,
-      retry: () => runBtw(prompt, onEvent, options),
-    });
-  }
-  const mainPrior = getSession(mainSessionKey);
-  const mainSessionId = mainPrior && mainPrior.id ? mainPrior.id : null;
-  return runClaudeInvocation({
-    prompt,
-    onEvent,
-    signal,
-    workdir,
-    settings: readOnlySettings,
-    sessionKey: btwSessionKey,
-    resumeId: mainSessionId,
-    forkSession: !!mainSessionId,
-    // Forking from the main session: never clear the main session on failure.
-    canRetry: false,
-  });
-}
-
-function runBtwAgent(agentKey, prompt, onEvent, options = {}) {
-  if (agentKey === 'claude') return runBtw(prompt, onEvent, options);
-  if (agentKey === 'codex') return runCodexBtw(prompt, onEvent, options);
-  throw new Error(`BTW is not available for ${agentKey || 'this agent'}`);
 }
 
 // The app-server names item types in camelCase; `codex exec --json` used
@@ -619,33 +545,6 @@ function runCodex(prompt, onEvent, sessionKey, signal, workdir, settings) {
     );
 
   return finishRun(run, { agentKey: 'codex', onEvent });
-}
-
-// The /btw sidekick for codex: a read-only side question that inherits the main
-// thread's memory without writing back to it. The branch is codex's own
-// `thread/fork`; Relay previously had to copy rows and rollout files inside
-// codex's private SQLite state to get the same result.
-async function runCodexBtw(prompt, onEvent, options = {}) {
-  const { mainSessionKey, btwSessionKey, signal, workdir, settings } = options;
-  const readOnlySettings = { ...(settings || {}), permission: 'read-only' };
-  const btwPrior = getSession(btwSessionKey);
-  if (!btwPrior || !btwPrior.id) {
-    const mainPrior = getSession(mainSessionKey);
-    const mainThreadId = mainPrior && mainPrior.id ? mainPrior.id : null;
-    if (mainThreadId) {
-      const childThreadId = await codexPool.driverCall(
-        'fork',
-        mainThreadId,
-        workdir || getDefaultWorkdir(),
-      );
-      setSession(btwSessionKey, {
-        id: childThreadId,
-        parentId: mainThreadId,
-        forkedAt: new Date().toISOString(),
-      });
-    }
-  }
-  return runCodex(prompt, onEvent, btwSessionKey, signal, workdir, readOnlySettings);
 }
 
 // Agents log freely to stderr, so when a turn produced no text at all the tail
@@ -860,8 +759,6 @@ module.exports = {
   getAgent,
   commandExists,
   runAgent,
-  runBtw,
-  runBtwAgent,
   getSession,
   clearSession,
   purgeSession,

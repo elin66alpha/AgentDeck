@@ -17,8 +17,6 @@ const {
   getAgent,
   listAgents,
   runAgent,
-  runBtw,
-  runBtwAgent,
   purgeSession,
   shutdownPools,
 } = require('./lib/agents');
@@ -105,7 +103,6 @@ const createSessionsRouter = require('./routes/sessions');
 const createQuotaRouter = require('./routes/quota');
 const createPushRouter = require('./routes/push');
 const createMetaRouter = require('./routes/meta');
-const createBtwRouter = require('./routes/btw');
 const createGroupRouter = require('./routes/group');
 const createAgentAuthRouter = require('./routes/agent-auth');
 const createTerminalRouter = require('./routes/terminal');
@@ -162,7 +159,6 @@ function isStreamingApiPath(req) {
     case '/events':
     case '/chat':
     case '/group/chat':
-    case '/btw':
     case '/fs/download':
     case '/fs/upload':
     case '/agent-auth/login/start':
@@ -871,8 +867,6 @@ const routeContext = {
   resolveUploadTarget,
   revokeTokenById,
   runAgentTurn,
-  runBtw,
-  runBtwAgent,
   runningScopes,
   safeDownloadName,
   scopeChains,
@@ -901,7 +895,6 @@ app.use(createMetaRouter(routeContext));
 app.use(createPushRouter(routeContext));
 app.use(createFsRouter(routeContext));
 app.use(createChatRouter(routeContext));
-app.use(createBtwRouter(routeContext));
 app.use(createGroupRouter(routeContext));
 app.use(createAgentAuthRouter(routeContext));
 app.use(createSessionsRouter(routeContext));

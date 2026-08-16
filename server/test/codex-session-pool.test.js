@@ -223,15 +223,6 @@ test('approval requests are answered with codex vocabulary', async () => {
   await done();
 });
 
-test('fork branches a thread through the protocol', async () => {
-  const { pool, state, done } = makePool();
-  const main = await send(pool, 'a', 'one');
-  const forked = await pool.driverCall('fork', main.sessionId, '/w');
-  assert.notEqual(forked, main.sessionId);
-  assert.ok(state().includes(`fork ${main.sessionId} -> ${forked}`));
-  await done();
-});
-
 test('purge deletes the thread in-protocol, with no CLI to shell out to', async () => {
   const { pool, state, done } = makePool();
   const first = await send(pool, 'a', 'one');

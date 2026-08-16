@@ -676,19 +676,6 @@ function createStdioAgentPool(options = {}) {
     if (conn) dropConnection(conn, null, true);
   }
 
-  // Call a protocol operation that is not a turn (codex's thread/fork). The
-  // connection is opened if needed and released again when nothing is using it.
-  async function driverCall(name, ...args) {
-    const c = await ensureConnection();
-    const fn = c.driver[name];
-    if (!fn) throw new Error(`${agentKey} does not support ${name}`);
-    try {
-      return await fn(...args);
-    } finally {
-      closeIdleConnection();
-    }
-  }
-
   function stats() {
     return {
       live: live.size,
@@ -700,7 +687,7 @@ function createStdioAgentPool(options = {}) {
     };
   }
 
-  return { send, forget, shutdown, stats, driverCall };
+  return { send, forget, shutdown, stats };
 }
 
 module.exports = { createStdioAgentPool };

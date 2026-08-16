@@ -424,18 +424,6 @@ class AppStrings {
   String get agentThinking => isZh ? '思考过程' : 'Thinking';
   String agentSteps(int count) =>
       isZh ? '执行步骤 · $count 条' : '$count ${count == 1 ? 'step' : 'steps'}';
-  String get btwTitle => isZh ? 'BTW 副手' : 'BTW sidekick';
-  String get btwSubtitle => isZh
-      ? '基于当前对话记忆的只读旁支问答，不影响主任务'
-      : 'Read-only side questions with the current chat\'s memory';
-  String get btwHint => isZh ? '问一个旁支问题…' : 'Ask a side question…';
-  String get btwTooltip => isZh ? 'BTW 旁支提问' : 'Ask a side question (BTW)';
-  String get btwNeedsConversation =>
-      isZh ? '先发送一条消息再使用 BTW' : 'Send a message first to use BTW';
-  String get btwClearTitle => isZh ? '清空 BTW' : 'Clear BTW';
-  String get btwEmpty => isZh
-      ? '在这里向副手提问，它了解当前主对话的内容。'
-      : 'Ask the sidekick here — it knows the current conversation.';
   String startChat(String agent) =>
       isZh ? '与 $agent 开始对话' : 'Start chatting with $agent';
   String get chooseConversationTarget => isZh

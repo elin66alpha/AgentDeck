@@ -257,9 +257,6 @@ function createClaudeSessionPool(options = {}) {
           systemPrompt: { type: 'preset', preset: 'claude_code' },
           includePartialMessages: true,
           ...(request.resumeId ? { resume: request.resumeId } : {}),
-          ...(request.resumeId && request.forkSession
-            ? { forkSession: true }
-            : {}),
           ...(request.executablePath
             ? { pathToClaudeCodeExecutable: request.executablePath }
             : {}),
@@ -381,15 +378,9 @@ function createClaudeSessionPool(options = {}) {
       entry = null;
     }
     const warm = !!entry;
-    if (!entry) {
-      // A restart resumes the conversation it replaced rather than forking it
-      // a second time.
-      entry = await spawnEntry(
-        resumeId === request.resumeId
-          ? request
-          : { ...request, resumeId, forkSession: false },
-      );
-    }
+    // A restart resumes the conversation it replaced; the live session's id
+    // wins over the caller's, which may be one turn behind.
+    if (!entry) entry = await spawnEntry({ ...request, resumeId });
     try {
       return await runTurn(entry, request);
     } catch (err) {
@@ -397,13 +388,7 @@ function createClaudeSessionPool(options = {}) {
       if (!warm || !lost) throw err;
       // A warm session died before producing anything. Fall back to the cold
       // path so a stale pooled process is never worse than no pool at all.
-      // The fork (if any) already happened when the session was first spawned,
-      // so resume into it rather than forking a second time.
-      const fresh = await spawnEntry({
-        ...request,
-        resumeId,
-        forkSession: false,
-      });
+      const fresh = await spawnEntry({ ...request, resumeId });
       return runTurn(fresh, request);
     }
   }

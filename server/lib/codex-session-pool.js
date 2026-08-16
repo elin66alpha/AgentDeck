@@ -117,17 +117,6 @@ function createCodexDriver(rpc) {
         .then(() => true, () => false);
     },
 
-    // Branch a thread into a new one that inherits its memory without writing
-    // back to it — how /btw asks a side question without disturbing the main
-    // task. Relay used to do this by copying rows and rollout files inside
-    // codex's private SQLite state; this is the supported operation for it.
-    async fork(threadId, cwd) {
-      const forked = await rpc.request('thread/fork', { threadId, cwd });
-      const id = forked && forked.thread && forked.thread.id;
-      if (!id) throw new Error('codex returned no forked thread id');
-      return id;
-    },
-
     handleMessage(msg) {
       const params = msg.params || {};
       // Every Relay tier runs with approvalPolicy "never", so these should not

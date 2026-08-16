@@ -28,7 +28,7 @@ the backend OS user. A stable deployment should have all of the following:
 ### Reverse proxy requirements
 
 - Forward normal HTTP requests and long-lived SSE responses. Disable buffering
-  for `/api/events`, `/api/chat`, `/api/group/chat`, `/api/btw`, and
+  for `/api/events`, `/api/chat`, `/api/group/chat`, and
   `/api/agent-auth/login/start`.
 - Forward `Upgrade`/`Connection` headers for the WebSocket endpoint
   `/api/terminal/connect`. Do not log its one-time `ticket` query value.
@@ -198,11 +198,6 @@ Swarms can be cleared, updated, deleted, or saved as reusable JSON templates.
 Templates contain the name, member list, and member configuration; they omit the
 machine-specific workdir, id, and transcript.
 
-BTW side conversations are read-only and do not modify the main session. Both
-Claude and Codex branch through their own CLI: Claude forks its session, Codex
-forks its thread. The fork inherits the main conversation's memory and gets its
-own id, so the side question never writes back into the main task.
-
 ### Quota and notifications
 
 The usage screen reports Claude Code and Codex. Reset detection and
@@ -241,8 +236,6 @@ WebSocket upgrade requires the short-lived ticket created by its HTTP endpoint.
 - Named sessions: list/create, set active, and delete.
 - Files/workdir: current workdir, absolute directory browse, upload, and
   download.
-- BTW: chat, history, and clear. Cancellation uses the normal chat cancellation
-  endpoint and side-scope metadata.
 - Swarms: list/create, update members, delete, history, clear, chat, and cancel.
 - Quota: usage, schedules, schedule replacement, and cancellation.
 - Push: browser subscription/config and FCM device registration.

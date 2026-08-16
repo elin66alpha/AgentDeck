@@ -46,8 +46,6 @@ flowchart LR
   model, effort, permission, nickname, and persona, then summon members with
   `@mentions`. Multiple members run in parallel from one transcript snapshot.
   Swarms can be saved and imported as JSON templates.
-- **Read-only BTW side conversations.** Ask Claude or Codex a side question
-  without changing the main task's native session.
 - **Remote files.** Browse absolute paths allowed by the backend, change the
   workdir, upload files, and download files or zipped folders.
 - **SSH terminal.** Open **Manage credentials → Enter SSH** for one resumable

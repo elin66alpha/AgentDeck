@@ -931,25 +931,6 @@ class BackendClient {
     );
   }
 
-  /// Send a /btw side question. Always streams; the backend forks the main
-  /// conversation's session so the answer has its memory without disturbing it.
-  Future<ChatReply> sendBtwMessage({
-    required String agentKey,
-    required String sessionId,
-    required String prompt,
-    required String requestId,
-    required void Function(BackendEvent event) onEvent,
-  }) {
-    return _sendMessageStreamed(
-      agentKey: agentKey,
-      sessionId: sessionId,
-      prompt: prompt,
-      requestId: requestId,
-      onEvent: onEvent,
-      path: '/api/btw',
-    );
-  }
-
   Future<ChatReply> _sendMessageStreamed({
     required String agentKey,
     required String sessionId,
@@ -1204,36 +1185,6 @@ class BackendClient {
       return compute(_decodeHistoryMessages, response.body);
     }
     return _decodeHistoryMessages(response.body);
-  }
-
-  /// Fetches the /btw side conversation tied to the given main session.
-  Future<List<ChatMessage>> fetchBtwHistory(
-    String agentKey, {
-    required String sessionId,
-  }) async {
-    final String query = 'agent=${Uri.encodeQueryComponent(agentKey)}'
-        '&sessionId=${Uri.encodeQueryComponent(sessionId)}';
-    final Object? decoded =
-        await _requestJson('GET', '/api/btw/history?$query');
-    if (decoded is! Map) {
-      throw BackendException('Invalid btw history response.');
-    }
-    final List<Object?> raw = decoded['messages'] is List
-        ? (decoded['messages'] as List).cast<Object?>()
-        : const <Object?>[];
-    return raw
-        .whereType<Map>()
-        .map((Map item) => ChatMessage.fromJson(item.cast<String, Object?>()))
-        .toList(growable: false);
-  }
-
-  /// Resets the /btw side conversation so the next question re-forks the main one.
-  Future<void> clearBtw(String agentKey, String sessionId) async {
-    await _requestJson(
-      'POST',
-      '/api/btw/clear',
-      body: <String, Object?>{'agent': agentKey, 'sessionId': sessionId},
-    );
   }
 
   // --- Group chat (multi-agent) ---------------------------------------------

@@ -25,7 +25,6 @@ import '../machines/machine_credentials_screen.dart';
 import '../settings/getting_started_screen.dart';
 import 'agent_controls.dart';
 import 'bot_chat_controller.dart';
-import 'btw_dialog.dart';
 import 'chat_content.dart';
 import 'group_chat_screen.dart';
 
@@ -270,28 +269,6 @@ class _BotChatScreenState extends State<BotChatScreen>
     }
   }
 
-  Future<void> _showBtw() async {
-    final CliAgent agent = widget.agentsController.activeAgent;
-    const Set<String> btwAgents = <String>{'claude', 'codex'};
-    if (!btwAgents.contains(agent.key)) return;
-    final String? sessionId = widget.chatController.activeSessionId;
-    if (widget.chatController.messageCount == 0 ||
-        sessionId == null ||
-        sessionId.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.l10n.btwNeedsConversation)),
-      );
-      return;
-    }
-    await BtwDialog.show(
-      context,
-      backend: widget.chatController.backend,
-      agentKey: agent.key,
-      sessionId: sessionId,
-      language: widget.settingsController.language,
-    );
-  }
-
   Future<void> _exportMarkdown() async {
     try {
       final ConversationExport export = await widget.chatController
@@ -354,11 +331,6 @@ class _BotChatScreenState extends State<BotChatScreen>
                 chatController: widget.chatController,
               ),
               actions: <Widget>[
-                _BtwButton(
-                  agentsController: widget.agentsController,
-                  chatController: widget.chatController,
-                  onPressed: _showBtw,
-                ),
                 _SearchButton(
                   chatController: widget.chatController,
                   onPressed: _showHistorySearch,
@@ -389,7 +361,6 @@ class _BotChatScreenState extends State<BotChatScreen>
                       machinesController: widget.machinesController,
                       chatController: widget.chatController,
                       onSearch: _showHistorySearch,
-                      onBtw: _showBtw,
                     ),
                   ListenableBuilder(
                     listenable: Listenable.merge(<Listenable>[
@@ -544,14 +515,12 @@ class _DesktopChatHeader extends StatelessWidget {
     required this.machinesController,
     required this.chatController,
     required this.onSearch,
-    required this.onBtw,
   });
 
   final CliAgentsController agentsController;
   final MachineCredentialsController machinesController;
   final BotChatController chatController;
   final VoidCallback onSearch;
-  final VoidCallback onBtw;
 
   @override
   Widget build(BuildContext context) {
@@ -573,11 +542,6 @@ class _DesktopChatHeader extends StatelessWidget {
                   machinesController: machinesController,
                   chatController: chatController,
                 ),
-              ),
-              _BtwButton(
-                agentsController: agentsController,
-                chatController: chatController,
-                onPressed: onBtw,
               ),
               _SearchButton(
                 chatController: chatController,
@@ -641,57 +605,6 @@ class _ChatTitle extends StatelessWidget {
                 ),
               ),
           ],
-        );
-      },
-    );
-  }
-}
-
-// The /btw sidekick entry point, sitting just left of search. It stays enabled
-// while the main agent is working — that is exactly when a quick side question
-// is useful. Empty conversations surface the normal "needs conversation" hint.
-class _BtwButton extends StatelessWidget {
-  const _BtwButton({
-    required this.agentsController,
-    required this.chatController,
-    required this.onPressed,
-  });
-
-  final CliAgentsController agentsController;
-  final BotChatController chatController;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: Listenable.merge(<Listenable>[
-        agentsController,
-        chatController,
-      ]),
-      builder: (BuildContext context, Widget? _) {
-        if (chatController.machine == null) {
-          return const SizedBox.shrink();
-        }
-        final String agentKey = agentsController.activeAgent.key;
-        const Set<String> btwAgents = <String>{'claude', 'codex'};
-        if (!btwAgents.contains(agentKey)) {
-          return const SizedBox.shrink();
-        }
-        return IconButton(
-          icon: const SizedBox(
-            width: 32,
-            child: Text(
-              'BTW',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 0,
-              ),
-            ),
-          ),
-          tooltip: context.l10n.btwTooltip,
-          onPressed: onPressed,
         );
       },
     );

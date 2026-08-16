@@ -129,14 +129,6 @@ module.exports = function createSessionsRouter(ctx) {
     const result = deleteChatSession(contextKey, sessionId);
     await purgeSession(scopeKey, { agentKey: agent.key, workdir });
     clearHistory(scopeKey);
-    // The /btw side chat is a fork of this conversation and has a transcript of
-    // its own, so deleting the chat has to take it down too.
-    const btwScopeKey = scopeKeyFor(`btw:${agent.key}`, workdir, sessionId);
-    await purgeSession(btwScopeKey, {
-      agentKey: `btw:${agent.key}`,
-      workdir,
-    });
-    clearHistory(btwScopeKey);
     return res.json({
       ok: true,
       agent: agentPayload(agent),

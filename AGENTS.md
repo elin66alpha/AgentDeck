@@ -42,7 +42,7 @@ clients and bundles CanvasKit locally instead of depending on gstatic.
   platform adapters.
 - `server/server.js`: server configuration, middleware, shared runtime state,
   scheduling, route context, and optional Web static hosting.
-- `server/routes/`: API routers for metadata, push, files, chat, BTW, Swarms,
+- `server/routes/`: API routers for metadata, push, files, chat, Swarms,
   agent login, sessions, quota, and the SSH terminal ticket.
 - `server/lib/`: agent runners, settings/model discovery, persistence, auth,
   filesystem policy, history, quota, push, and orchestration helpers.
@@ -104,8 +104,6 @@ clients and bundles CanvasKit locally instead of depending on gstatic.
     driver's job (`allow_once` vs `accept` vs `approved`).
   - `runAcpAgent` in `agents.js` is the shared runner for opencode and hermes,
     which differ only by their pool and their entries in the option tables.
-- Codex's /btw fork is the CLI's own `thread/fork`. Do not go back to editing
-  `~/.codex/state_5.sqlite` or copying rollout files.
 - Deleting or clearing a conversation goes through `purgeSession`, not
   `clearSession`: for a pooled agent it also deletes the CLI-side transcript so
   the conversation is really gone. Use `clearSession` only for the internal
@@ -161,9 +159,6 @@ clients and bundles CanvasKit locally instead of depending on gstatic.
   members run in parallel from their own delta prompts.
 - Swarm configuration is stored under the workspace that lists it, while its
   chosen work tree is the directory members actually use.
-- BTW is read-only and isolated from the main session. Claude forks natively;
-  Codex clones its native persisted conversation before resuming the side
-  scope.
 - The SSH terminal exchanges the bearer credential for a short-lived,
   single-use WebSocket ticket. Never put the bearer token in a socket URL. A
   token record owns one resumable PTY, which runs with the full permissions of

@@ -167,14 +167,6 @@ function handle(msg) {
       reply({ thread: { id: params.threadId } });
       return;
     }
-    case 'thread/fork': {
-      counter += 1;
-      const id = `fork-${counter}`;
-      threads.set(id, { cwd: params.cwd });
-      record(`fork ${params.threadId} -> ${id}`);
-      reply({ thread: { id } });
-      return;
-    }
     case 'turn/start':
       handleTurnStart(msg);
       return;
