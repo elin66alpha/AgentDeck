@@ -23,6 +23,9 @@ dependencies:
   path_provider: ^2.1.4
   web: ^1.1.1
   flutter_markdown_plus: ^1.0.7
+  # Already pulled in by flutter_markdown_plus; declared directly so chat
+  # rendering can add its own inline syntax (the search-hit marker).
+  markdown: ^7.3.1
   firebase_core: ^4.10.0
   firebase_messaging: ^16.3.0
   xterm: ^4.0.0
