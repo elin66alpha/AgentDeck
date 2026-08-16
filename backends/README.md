@@ -10,10 +10,10 @@ Cloudflare Tunnel startup to each operating system.
 
 - Node.js 18 or newer.
 - At least one supported CLI installed on the backend: Claude Code, Codex,
-  Antigravity (`agy`), OpenCode, or Hermes.
+  OpenCode, or Hermes.
 - The CLI must be authenticated on the host. Relay can bridge OAuth login for
-  Claude, Codex, and Agy when the host provides the compatible `script` PTY
-  utility; OpenCode and Hermes keys remain host-managed.
+  Claude and Codex when the host provides the compatible `script` PTY utility;
+  OpenCode and Hermes keys remain host-managed.
 - `cloudflared` is required only for named or Quick Tunnel mode.
 
 ## Install

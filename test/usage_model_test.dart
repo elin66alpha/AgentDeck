@@ -39,8 +39,8 @@ void main() {
   group('UsageAgent.fromJson', () {
     test('parses nested quotas and propagates the expired flag', () {
       final UsageAgent agent = UsageAgent.fromJson(<String, Object?>{
-        'key': 'agy',
-        'label': 'Antigravity',
+        'key': 'codex',
+        'label': 'Codex',
         'available': true,
         'stale': true,
         'asOf': '2026-06-19T07:00:00.000Z',
@@ -49,7 +49,7 @@ void main() {
           <String, Object?>{'key': 'seven_day', 'expired': false},
         ],
       });
-      expect(agent.key, 'agy');
+      expect(agent.key, 'codex');
       expect(agent.available, isTrue);
       expect(agent.stale, isTrue);
       expect(agent.quotas, hasLength(2));
@@ -59,13 +59,13 @@ void main() {
 
     test('handles an unavailable agent with no quotas', () {
       final UsageAgent agent = UsageAgent.fromJson(<String, Object?>{
-        'key': 'agy',
-        'label': 'Antigravity',
+        'key': 'codex',
+        'label': 'Codex',
         'available': false,
-        'unavailableReason': 'start agy once',
+        'unavailableReason': 'codex is not logged in',
       });
       expect(agent.available, isFalse);
-      expect(agent.unavailableReason, 'start agy once');
+      expect(agent.unavailableReason, 'codex is not logged in');
       expect(agent.quotas, isEmpty);
     });
   });

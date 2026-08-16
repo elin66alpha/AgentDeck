@@ -63,7 +63,7 @@ Implemented controls include:
   `X-Forwarded-For`;
 - a startup warning when a routable public URL uses plaintext HTTP.
 
-The in-app Claude/Codex/Agy login bridge starts the real CLI in a backend PTY.
+The in-app Claude/Codex login bridge starts the real CLI in a backend PTY.
 It returns authorization URLs and status only, redacts URLs from diagnostic
 output, and never returns stored OAuth tokens. The bridge currently depends on
 GNU-compatible `script -qfec`; log in directly on hosts without it. OpenCode and
@@ -110,7 +110,7 @@ variants. A directory download is also rejected when its tree would contain a
 denied path.
 
 This list is intentionally precise, not a promise to detect every secret. It
-does not automatically cover arbitrary Agy, OpenCode, Hermes, provider, or
+does not automatically cover arbitrary OpenCode, Hermes, provider, or
 service-account files. Set `RELAY_FS_ROOTS` to a comma-separated allowlist of
 absolute directories and run Relay as a restricted OS user. The allowlist
 limits the file API only; it does not change what a launched CLI can access.
@@ -140,7 +140,7 @@ See the [production checklist](docs/handbook.md#production-deployment).
 
 ## What Relay does not do
 
-- It does not sandbox Claude Code, Codex, Agy, OpenCode, or Hermes.
+- It does not sandbox Claude Code, Codex, OpenCode, or Hermes.
 - It cannot stop an enabled fast mode or high-permission agent from consuming
   provider quota or changing files within its effective access.
 - It cannot protect an already compromised backend host or browser profile.

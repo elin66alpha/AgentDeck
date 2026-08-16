@@ -11,6 +11,8 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../core/backend/backend_client.dart';
 import '../../core/credentials/qr_image_decoder.dart';
+import '../../core/credentials/qr_image_pixels.dart';
+import '../../core/credentials/qr_pixels.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/models/cli_agent.dart';
 import '../../core/models/machine_credential.dart';
@@ -206,15 +208,27 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
       if (bytes == null || bytes.isEmpty) {
         throw MachineCredentialException(context.l10n.fileUnreadable);
       }
-      final String raw = await compute<Uint8List, String>(
-        decodeCredentialQrImage,
-        bytes,
-      ).timeout(
+      // Prefer the platform's own decoder (the browser's, on Web) and fall back
+      // to the pure-Dart pipeline on a background isolate. Doing the Dart decode
+      // on Web would block the only thread there is, freezing the tab past the
+      // point where this timeout could still fire.
+      final QrPixels? pixels = await decodeImageToRgba(bytes).timeout(
         const Duration(seconds: 10),
         onTimeout: () => throw MachineCredentialException(
           context.l10n.credentialQrDecodeTimedOut,
         ),
       );
+      final String raw = pixels != null
+          ? decodeQrFromRgba(pixels.width, pixels.height, pixels.rgba)
+          : await compute<Uint8List, String>(
+              decodeCredentialQrImage,
+              bytes,
+            ).timeout(
+              const Duration(seconds: 10),
+              onTimeout: () => throw MachineCredentialException(
+                context.l10n.credentialQrDecodeTimedOut,
+              ),
+            );
       if (raw.trim().isEmpty) {
         throw MachineCredentialException(context.l10n.invalidQr);
       }
@@ -739,7 +753,6 @@ class _AgentLoginDialogState extends State<_AgentLoginDialog> {
     final bool submitting = _flow.phase == AgentLoginPhase.submitting;
     final bool done = _flow.phase == AgentLoginPhase.done;
     final bool hasCode = _code.text.trim().isNotEmpty;
-    final bool requiresCode = _flow.requiresCode;
     return AlertDialog(
       title: Text(strings.agentLoginTitle(widget.agent.label)),
       content: SizedBox(
@@ -758,11 +771,7 @@ class _AgentLoginDialogState extends State<_AgentLoginDialog> {
               Text(_statusText(strings)),
               if (_flow.url != null && _flow.url!.isNotEmpty) ...<Widget>[
                 const SizedBox(height: 12),
-                Text(
-                  requiresCode
-                      ? strings.agentLoginOpenUrl
-                      : strings.agentLoginBrowserOpenUrl,
-                ),
+                Text(strings.agentLoginOpenUrl),
                 const SizedBox(height: 8),
                 DecoratedBox(
                   decoration: BoxDecoration(
@@ -792,18 +801,16 @@ class _AgentLoginDialogState extends State<_AgentLoginDialog> {
                   ),
                 ),
               ],
-              if (requiresCode) ...<Widget>[
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _code,
-                  enabled: !done && _flow.phase != AgentLoginPhase.error,
-                  decoration: InputDecoration(
-                    labelText: strings.agentLoginCode,
-                    hintText: strings.agentLoginCodeHint,
-                  ),
-                  onSubmitted: (_) => unawaited(_submit()),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _code,
+                enabled: !done && _flow.phase != AgentLoginPhase.error,
+                decoration: InputDecoration(
+                  labelText: strings.agentLoginCode,
+                  hintText: strings.agentLoginCodeHint,
                 ),
-              ],
+                onSubmitted: (_) => unawaited(_submit()),
+              ),
               if (_flow.output.isNotEmpty) ...<Widget>[
                 const SizedBox(height: 12),
                 Text(
@@ -841,7 +848,7 @@ class _AgentLoginDialogState extends State<_AgentLoginDialog> {
           onPressed: _close,
           child: Text(done ? strings.close : strings.cancel),
         ),
-        if (!done && requiresCode)
+        if (!done)
           FilledButton(
             onPressed: _flow.canSubmitCode && hasCode && !submitting
                 ? () => unawaited(_submit())
@@ -862,9 +869,7 @@ class _AgentLoginDialogState extends State<_AgentLoginDialog> {
       AgentLoginPhase.starting =>
         strings.agentLoginStarting,
       AgentLoginPhase.waitingForUrl => strings.agentLoginWaitingForUrl,
-      AgentLoginPhase.readyForCode => _flow.requiresCode
-          ? strings.agentLoginOpenUrl
-          : strings.agentLoginBrowserOpenUrl,
+      AgentLoginPhase.readyForCode => strings.agentLoginOpenUrl,
       AgentLoginPhase.submitting => strings.agentLoginSubmitting,
       AgentLoginPhase.done => strings.agentLoginDone,
       AgentLoginPhase.error => strings.agentLoginFailed(

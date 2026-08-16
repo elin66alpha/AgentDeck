@@ -1400,7 +1400,7 @@ class BackendClient {
 
   /// Best-effort login state per agent so the app can warn before sending a
   /// message. Maps agentKey -> loggedIn, where the value is true/false when the
-  /// backend can read the CLI's credentials, or null when it cannot tell (agy).
+  /// backend can read the CLI's credentials, or null when it cannot tell.
   Future<Map<String, bool?>> fetchAuthStatus() async {
     final Object? decoded = await _requestJson('GET', '/api/auth/status');
     final Map<String, bool?> result = <String, bool?>{};

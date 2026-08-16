@@ -7,9 +7,9 @@ class CliAgent {
     this.authed = true,
     bool? usable,
     String? authKind,
-  }) : usable = usable ??
+  })  : usable = usable ??
             (installed && (authed || key == 'opencode' || key == 'hermes')),
-       authKind = authKind ?? 'unknown';
+        authKind = authKind ?? 'unknown';
 
   factory CliAgent.fromJson(Map<String, Object?> json) {
     final String key = json['key'] as String? ?? 'claude';
@@ -21,8 +21,7 @@ class CliAgent {
       description: json['description'] as String? ?? '',
       installed: installed,
       authed: authed,
-      usable:
-          json['usable'] as bool? ??
+      usable: json['usable'] as bool? ??
           (installed && (authed || key == 'opencode' || key == 'hermes')),
       authKind: json['authKind'] as String? ?? defaultAuthKindForAgent(key),
     );
@@ -71,7 +70,6 @@ String defaultAuthKindForAgent(String key) {
   switch (key) {
     case 'claude':
     case 'codex':
-    case 'agy':
       return 'oauth';
     case 'hermes':
       return 'apiKey';
@@ -97,12 +95,6 @@ const List<CliAgent> defaultCliAgents = <CliAgent>[
     key: 'codex',
     label: 'Codex',
     description: 'OpenAI Codex CLI',
-    authKind: 'oauth',
-  ),
-  CliAgent(
-    key: 'agy',
-    label: 'Antigravity',
-    description: 'Antigravity CLI',
     authKind: 'oauth',
   ),
 ];

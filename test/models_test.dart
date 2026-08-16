@@ -55,9 +55,9 @@ void main() {
 
     test('memberLabels resolves known agent keys', () {
       final ChatGroup g = ChatGroup.fromJson(<String, Object?>{
-        'members': <Object?>['claude', 'codex', 'agy'],
+        'members': <Object?>['claude', 'codex', 'opencode'],
       });
-      expect(g.memberLabels, <String>['Claude Code', 'Codex', 'Antigravity']);
+      expect(g.memberLabels, <String>['Claude Code', 'Codex', 'OpenCode']);
     });
   });
 

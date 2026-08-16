@@ -260,7 +260,7 @@ const List<_DeployStep> _zhSteps = <_DeployStep>[
   _DeployStep(
     title: '准备一台后端机器',
     body: '一台你自己的电脑或服务器都行：家里的 PC、Mac，或一台云服务器。'
-        '先装好 Node.js 18+ 和至少一个 CLI 智能体（Claude Code、Codex、Antigravity 等）。'
+        '先装好 Node.js 18+ 和至少一个 CLI 智能体（Claude Code、Codex、OpenCode 等）。'
         '可在主机上登录，兼容的 OAuth agent 也可稍后在 Relay 中登录。',
   ),
   _DeployStep(
@@ -292,7 +292,7 @@ const List<_DeployStep> _enSteps = <_DeployStep>[
     title: 'Prepare a backend machine',
     body: 'Any computer you own works: a home PC, a Mac, or a cloud server. '
         'Install Node.js 18+ and at least one CLI agent (Claude Code, Codex, '
-        'Antigravity, …). Log in on the host, or use Relay later for a '
+        'OpenCode, …). Log in on the host, or use Relay later for a '
         'compatible OAuth agent.',
   ),
   _DeployStep(

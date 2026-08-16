@@ -158,7 +158,7 @@ class BotChatController extends ChangeNotifier {
   String _agentLabelFor(String agentKey) => cliAgentByKey(agentKey).label;
 
   /// Login state for an agent CLI on the backend host: true/false when known,
-  /// or null when unchecked or undeterminable (e.g. agy). Drives the
+  /// or null when unchecked or undeterminable. Drives the
   /// "not logged in" banner; it never blocks sending, since detection is
   /// best-effort and a real failure is still caught when the turn runs.
   bool? agentLoggedIn(String agentKey) => _authStatus[agentKey];
@@ -532,6 +532,9 @@ class BotChatController extends ChangeNotifier {
   // when the backend has no VAPID keys, or until the user grants permission
   // (retried on the next app open). Runs at most once per session.
   bool _pushSynced = false;
+  // Set only once a subscription is registered with the backend, so it means
+  // "push will reach this browser" rather than "we finished trying".
+  bool _webPushActive = false;
   Future<void> syncPushSubscription({bool force = false}) async {
     if ((!force && _pushSynced) || _machine == null || !webPushSupported()) {
       return;
@@ -551,6 +554,7 @@ class BotChatController extends ChangeNotifier {
         taskPushEnabled: _taskPushEnabled,
       );
       _pushSynced = true;
+      _webPushActive = true;
     } catch (_) {
       // Best-effort; the next app open retries.
     }
@@ -1770,20 +1774,41 @@ class BotChatController extends ChangeNotifier {
   }
 
   Future<void> _showQuotaNotification(String message) async {
-    await _showNotificationOrSystemMessage(message);
+    // The backend sends every quota alert twice on purpose: once down the event
+    // stream for open sessions, and once as a push for closed ones. On the web
+    // the push service worker shows its copy whether or not the tab is focused,
+    // so a browser this backend can actually push to must not also show the
+    // event-stream copy — that is the duplicate.
+    if (_webPushDelivers(quota: true)) return;
+    await _showNotificationOrSystemMessage(message, tag: 'quota');
   }
 
   Future<void> _showBackgroundTurnNotification(BackgroundTurn turn) async {
+    if (_webPushDelivers(quota: false)) return;
     await _showNotificationOrSystemMessage(
       _strings.backgroundSessionFinished(turn.agentLabel, turn.sessionName),
+      tag: 'task:${turn.agentKey}:${turn.sessionId}',
     );
   }
 
-  Future<void> _showNotificationOrSystemMessage(String message) async {
+  /// Whether this browser's push subscription will already deliver an alert of
+  /// this category, making an in-page notification a duplicate. False off the
+  /// web, and false until a subscription is actually registered — a backend
+  /// with no VAPID keys never pushes, so the in-page copy stays the only one.
+  bool _webPushDelivers({required bool quota}) {
+    if (!kIsWeb || !_webPushActive) return false;
+    return quota ? _quotaPushEnabled : _taskPushEnabled;
+  }
+
+  Future<void> _showNotificationOrSystemMessage(
+    String message, {
+    String? tag,
+  }) async {
     try {
       final bool shown = await NotificationService.instance.show(
         title: 'Relay',
         body: message,
+        tag: tag,
       );
       if (!shown) _appendSystemMessage(message);
     } catch (_) {

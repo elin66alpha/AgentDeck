@@ -30,17 +30,14 @@ class AgentLoginFlowController extends ChangeNotifier {
   String? _url;
   String _output = '';
   String? _error;
-  bool _requiresCode = true;
 
   AgentLoginPhase get phase => _phase;
   String? get sessionId => _sessionId;
   String? get url => _url;
   String get output => _output;
   String? get error => _error;
-  bool get requiresCode => _requiresCode;
 
   bool get canSubmitCode =>
-      _requiresCode &&
       _sessionId != null &&
       _sessionId!.isNotEmpty &&
       (_phase == AgentLoginPhase.readyForCode ||
@@ -52,7 +49,6 @@ class AgentLoginFlowController extends ChangeNotifier {
     _url = null;
     _output = '';
     _error = null;
-    _requiresCode = true;
     _setPhase(AgentLoginPhase.starting);
     try {
       _subscription = _startLogin(agentKey).listen(
@@ -69,11 +65,6 @@ class AgentLoginFlowController extends ChangeNotifier {
   }
 
   Future<void> submitCode(String code) async {
-    if (!_requiresCode) {
-      _error = 'Login session does not accept an authorization code.';
-      _setPhase(AgentLoginPhase.error);
-      return;
-    }
     final String? id = _sessionId;
     if (id == null || id.isEmpty) {
       _error = 'Login session is not ready.';
@@ -93,10 +84,6 @@ class AgentLoginFlowController extends ChangeNotifier {
     final String? eventSession = event.data['sessionId']?.toString();
     if (eventSession != null && eventSession.isNotEmpty) {
       _sessionId = eventSession;
-    }
-    final Object? requiresCode = event.data['requiresCode'];
-    if (requiresCode is bool) {
-      _requiresCode = requiresCode;
     }
     switch (event.type) {
       case 'login_started':

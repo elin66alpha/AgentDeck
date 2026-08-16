@@ -8,10 +8,9 @@ Relay 在所有后端操作系统上使用同一个 Node.js 服务和同一套 H
 ## 前置要求
 
 - Node.js 18 或更新版本。
-- 后端至少安装一个支持的 CLI：Claude Code、Codex、Antigravity（`agy`）、
-  OpenCode 或 Hermes。
+- 后端至少安装一个支持的 CLI：Claude Code、Codex、OpenCode 或 Hermes。
 - CLI 需要在后端主机上完成认证。当主机提供兼容的 `script` PTY 工具时，Relay 可以
-  为 Claude、Codex 和 Agy 中转 OAuth 登录；OpenCode 和 Hermes 的密钥仍在主机管理。
+  为 Claude 和 Codex 中转 OAuth 登录；OpenCode 和 Hermes 的密钥仍在主机管理。
 - 只有正式 Cloudflare Tunnel 或 Quick Tunnel 模式需要 `cloudflared`。
 
 ## 安装

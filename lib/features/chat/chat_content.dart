@@ -353,8 +353,8 @@ String _stripInlineMarkdown(String value) {
 }
 
 /// Splits a leading "here's my plan" preamble off an assistant answer so it can
-/// be folded away. agy (Antigravity) habitually opens with one or more "I will …"
-/// / "我将 …" planning paragraphs before the real answer. Returns (plan, body) when
+/// be folded away. Claude and Codex often open with one or more "I will …" /
+/// "我将 …" planning paragraphs before the real answer. Returns (plan, body) when
 /// such a preamble sits above a non-empty body, else null (so a message that is
 /// nothing but plan is never hidden).
 ({String plan, String body})? splitLeadingPlan(String text) {

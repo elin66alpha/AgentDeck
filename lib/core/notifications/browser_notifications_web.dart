@@ -15,13 +15,19 @@ Future<void> requestBrowserNotificationPermission() async {
 Future<bool> showBrowserNotification({
   required String title,
   required String body,
+  String? tag,
 }) async {
   try {
     if (web.Notification.permission == 'default') {
       await requestBrowserNotificationPermission();
     }
     if (web.Notification.permission != 'granted') return false;
-    web.Notification(title, web.NotificationOptions(body: body));
+    web.Notification(
+      title,
+      tag == null
+          ? web.NotificationOptions(body: body)
+          : web.NotificationOptions(body: body, tag: tag),
+    );
     return true;
   } catch (_) {
     return false;

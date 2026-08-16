@@ -316,9 +316,6 @@ class AppStrings {
   String get agentLoginOpenUrl => isZh
       ? '在浏览器中打开此链接，完成授权后把代码粘贴回来。'
       : 'Open this link in a browser, authorize, then paste the code here.';
-  String get agentLoginBrowserOpenUrl => isZh
-      ? '在浏览器中打开此链接。完成授权后，状态会自动更新。'
-      : 'Open this link in a browser. Status will update after authorization finishes.';
   String get agentLoginCode => isZh ? '授权代码' : 'Authorization code';
   String get agentLoginCodeHint =>
       isZh ? '粘贴 CLI 要求的代码' : 'Paste the code requested by the CLI';
@@ -510,8 +507,8 @@ class AppStrings {
   String get licenseText => isZh ? '私有本地工具。' : 'Private local tool.';
   String get copyright => isZh ? '© 2026 Relay' : '© 2026 Relay';
   String get aboutDescription => isZh
-      ? '用于连接本机 Claude Code、Codex、Antigravity、OpenCode 和 Hermes CLI 智能体的私有控制台。'
-      : 'Private control surface for local Claude Code, Codex, Antigravity, OpenCode, and Hermes CLI agents.';
+      ? '用于连接本机 Claude Code、Codex、OpenCode 和 Hermes CLI 智能体的私有控制台。'
+      : 'Private control surface for local Claude Code, Codex, OpenCode, and Hermes CLI agents.';
   String get language => isZh ? '语言' : 'Language';
   String get appearance => isZh ? '外观' : 'Appearance';
   String get online => isZh ? '在线' : 'Online';

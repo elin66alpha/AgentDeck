@@ -272,7 +272,7 @@ class _BotChatScreenState extends State<BotChatScreen>
 
   Future<void> _showBtw() async {
     final CliAgent agent = widget.agentsController.activeAgent;
-    const Set<String> btwAgents = <String>{'claude', 'codex', 'agy'};
+    const Set<String> btwAgents = <String>{'claude', 'codex'};
     if (!btwAgents.contains(agent.key)) return;
     final String? sessionId = widget.chatController.activeSessionId;
     if (widget.chatController.messageCount == 0 ||
@@ -402,7 +402,7 @@ class _BotChatScreenState extends State<BotChatScreen>
                       }
                       final CliAgent agent =
                           widget.agentsController.activeAgent;
-                      // Only OAuth agents (claude/codex/agy) prompt to log in.
+                      // Only OAuth agents (claude/codex) prompt to log in.
                       // hermes/opencode manage their key on the host, so they
                       // never show the "not logged in" banner.
                       if (agent.authKind != 'oauth' ||
@@ -673,7 +673,7 @@ class _BtwButton extends StatelessWidget {
           return const SizedBox.shrink();
         }
         final String agentKey = agentsController.activeAgent.key;
-        const Set<String> btwAgents = <String>{'claude', 'codex', 'agy'};
+        const Set<String> btwAgents = <String>{'claude', 'codex'};
         if (!btwAgents.contains(agentKey)) {
           return const SizedBox.shrink();
         }
@@ -1690,18 +1690,13 @@ class _ChatNotice extends StatelessWidget {
   }
 }
 
-// The turn's persisted execution steps, minus agy's generic "working" ping which
-// carries no information once the answer is in (agy's real reasoning is folded
-// from its plan preamble instead).
+// The turn's persisted execution steps.
 List<String> _persistedSteps(ChatMessage message) {
   final Object? raw = message.metadata['progressLines'];
   if (raw is! List) return const <String>[];
   return raw
       .whereType<String>()
-      .where(
-        (String line) =>
-            line.trim().isNotEmpty && line != 'Antigravity is working...',
-      )
+      .where((String line) => line.trim().isNotEmpty)
       .toList(growable: false);
 }
 
@@ -1765,7 +1760,8 @@ class _MessageBubble extends StatelessWidget {
             segments.isNotEmpty ? segments.last.text : message.content,
           )
         : null;
-    // agy opens with an "I will …" plan; fold it away on the finished bubble.
+    // Claude and Codex often open with an "I will …" plan; fold it away on the
+    // finished bubble.
     final ({String plan, String body})? planSplit = (!isUser &&
             !system &&
             !streaming &&
