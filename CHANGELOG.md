@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.5 - Unreleased
+## 0.1.5 - 2026-08-19
 
 ### Removed
 
@@ -51,6 +51,10 @@
   quota schedules.
 
 ### Changed
+
+- Reworked the English and Chinese READMEs into a visual product tour with
+  Chromium screenshots captured against isolated demo data, a clearer system
+  diagram, and a shorter path from project overview to backend setup.
 
 - The composer's Model / Effort / Permission controls and the quota screens now
   open without waiting on the network. The option catalog describes the
