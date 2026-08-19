@@ -61,7 +61,7 @@ function fileStamp(filePath) {
   }
 }
 
-// Stream a (potentially large, ~250MB) binary in chunks, collecting every match
+// Stream a potentially large binary in chunks, collecting every match
 // of `regex` without loading the whole file into memory. A short tail overlap
 // between chunks keeps a token from being missed at a boundary.
 function scanFile(filePath, regex) {

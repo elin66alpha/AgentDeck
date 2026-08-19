@@ -283,8 +283,8 @@ const codexPool = createCodexSessionPool({
   },
 });
 
-// Agents whose sessions Relay hosts itself, so deleting a chat can really
-// delete the machine-side conversation instead of just forgetting its id.
+// Agents whose sessions Relay hosts itself, so deleting a chat can request
+// machine-side transcript deletion instead of only forgetting its id.
 const SESSION_POOLS = {
   claude: claudePool,
   opencode: opencodePool,
@@ -292,10 +292,9 @@ const SESSION_POOLS = {
   codex: codexPool,
 };
 
-// Delete a scope's conversation for good. Deleting a chat in the app means the
-// conversation is gone, so a pooled scope also loses its CLI-side transcript:
-// without that, the id would be forgotten while the transcript lingered on
-// disk, resumable forever.
+// Clear Relay's scope and ask the integration to delete its CLI-side transcript.
+// External deletion is best effort, but omitting the request would always leave
+// the forgotten transcript on disk and potentially resumable.
 async function purgeSession(sessionKey, options = {}) {
   const pool = SESSION_POOLS[String(options.agentKey || '')];
   if (!pool) return clearSession(sessionKey);

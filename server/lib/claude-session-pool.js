@@ -393,8 +393,8 @@ function createClaudeSessionPool(options = {}) {
     }
   }
 
-  // Drop the live process for a scope. `sessionId` additionally deletes the
-  // stored transcript, so a session the user deleted can never be resumed.
+  // Drop the live process for a scope. With `purge`, also make a best-effort
+  // request to delete the stored transcript.
   async function forget(key, opts = {}) {
     const entry = live.get(key);
     const sessionId = opts.sessionId || (entry && entry.sessionId) || null;

@@ -126,10 +126,9 @@ const MAX_UPLOAD_BYTES = parseInt(
   process.env.UPLOAD_MAX_BYTES || String(100 * 1024 * 1024),
   10,
 );
-// Cap a single chat prompt. The prompt travels to the CLI as one argv token and
-// Linux limits a single argument to ~128KB (MAX_ARG_STRLEN), so anything larger
-// could never reach the agent — fail it with a clear error instead of a
-// confusing spawn failure. Override with PROMPT_MAX_BYTES.
+// Cap a single chat prompt before it enters an SDK or JSON-RPC session. Swarm
+// prompt construction uses the same budget so an accumulated transcript cannot
+// grow without bound. Override with PROMPT_MAX_BYTES.
 const MAX_PROMPT_BYTES = parseInt(
   process.env.PROMPT_MAX_BYTES || String(100 * 1024),
   10,
@@ -247,10 +246,10 @@ function streamUploadToFile(req, targetPath, maxBytes) {
   });
 }
 
-// Compress responses before they cross the tunnel. The web bundle is the bulk of
-// first-load bytes (main.dart.js ~3.6MB + canvaskit.wasm ~7MB); gzip cuts it ~60%,
-// turning a multi-minute first load into seconds. `compressible` does not flag
-// application/wasm, so allow it explicitly. Streaming/SSE responses set
+// Compress responses before they cross the tunnel. The JavaScript and CanvasKit
+// bundles dominate first-load bytes, so compression materially reduces startup
+// time. `compressible` does not flag application/wasm, so allow it explicitly.
+// Streaming/SSE responses set
 // `Cache-Control: no-transform`, which compression honors by skipping them.
 app.use(
   compression({
@@ -905,7 +904,7 @@ if (fs.existsSync(path.join(WEB_BUILD_DIR, 'index.html'))) {
     setHeaders(res, filePath) {
       const rel = path.relative(WEB_BUILD_DIR, filePath);
       // CanvasKit is pinned to the Flutter engine revision and is effectively
-      // immutable between SDK upgrades; cache the 7MB wasm hard so it downloads
+      // immutable between SDK upgrades; cache the wasm hard so it downloads
       // once and is then served from the browser cache with no request at all.
       if (rel.split(path.sep)[0] === 'canvaskit') {
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
@@ -914,7 +913,7 @@ if (fs.existsSync(path.join(WEB_BUILD_DIR, 'index.html'))) {
       // Other files (index.html, *.js, assets) keep their filenames across builds,
       // so allow caching but always revalidate: a matching ETag returns a tiny 304
       // instead of re-sending the bytes. Never `no-store` — that re-downloaded the
-      // whole ~11MB bundle on every load, which is what made the web take minutes.
+      // whole Web bundle on every load, which can make startup very slow.
       res.setHeader('Cache-Control', 'no-cache');
     },
   }));

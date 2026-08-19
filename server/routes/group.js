@@ -18,12 +18,11 @@ const {
 const { normalizeSettings } = require('../lib/agent-options');
 
 // Multi-agent group chat: one human, several agents, one canonical transcript.
-// The orchestrator reuses the single-agent turn pipeline (runAgentTurn) once per
-// summoned member, serialized on the group's scope so exactly one agent holds the
-// floor at a time. Each member runs against its OWN resumable CLI session (its
-// private memory) and is fed only the delta since it last spoke (see
-// docs/group-chat.md, "plan B"). The group transcript lives under a dedicated
-// scope agent key so it never mixes with any member's solo conversation.
+// The orchestrator reuses the single-agent turn pipeline (runAgentTurn) once for
+// every summoned member. Members in one wave run concurrently from the same
+// transcript snapshot, each against its OWN resumable CLI session and unseen
+// transcript delta (see docs/handbook.md, "Swarms"). The canonical transcript
+// uses a dedicated scope agent key so it never mixes with solo conversations.
 const GROUP_SCOPE_PREFIX = 'group:';
 const HUMAN_AUTHOR = 'human';
 

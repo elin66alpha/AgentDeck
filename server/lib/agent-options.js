@@ -1,9 +1,9 @@
 'use strict';
 
 // Single source of truth for the per-agent Model / Effort / Permission controls
-// exposed in the chat composer's "+" drawer. Each selectable option carries the
-// exact CLI argv tokens it maps to, so agents.js can splice them into a spawn
-// without knowing agent-specific flag shapes.
+// exposed in the chat composer's "+" drawer. The tables feed normalized settings
+// into the Claude SDK, ACP, Codex app-server, and legacy argv helpers without
+// making the runners duplicate validation.
 //
 // Capability-aware: each agent only exposes the controls supported by its CLI.
 // Hermes, for example, has no per-invocation model or effort flag.

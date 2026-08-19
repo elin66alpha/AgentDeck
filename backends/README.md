@@ -11,9 +11,11 @@ Cloudflare Tunnel startup to each operating system.
 - Node.js 18 or newer.
 - At least one supported CLI installed on the backend: Claude Code, Codex,
   OpenCode, or Hermes.
-- The CLI must be authenticated on the host. Relay can bridge OAuth login for
-  Claude and Codex when the host provides the compatible `script` PTY utility;
-  OpenCode and Hermes keys remain host-managed.
+- Every CLI must be authenticated or configured on the backend host itself.
+  Relay reports status but does not perform OAuth login or collect provider
+  keys.
+- Unix hosts need `zip` for directory downloads. Linux setup also needs PM2,
+  Python 3, `make`, and a C++ compiler for the terminal PTY dependency.
 - `cloudflared` is required only for named or Quick Tunnel mode.
 
 ## Install
@@ -39,7 +41,9 @@ app and enter the passphrase you chose.
    server stays on `127.0.0.1`.
 3. **Cloudflare Quick Tunnel:** useful for a trial. The generated
    `trycloudflare.com` URL may change after restart, so regenerate and re-import
-   the credential when it rotates.
+   the credential when it rotates. Find the new URL in the service logs, then
+   run `npm --prefix server run credential -- --url https://NEW-URL` from the
+   repository root.
 
 ## Service management
 
@@ -67,7 +71,8 @@ for tunnel modes, `relay-tunnel`. Logs are under `~/.pm2/logs/` as
 processes and leaves backend data, tokens, and credentials in place. The
 interactive terminal's PTY dependency is
 compiled on Linux, so first-time setup also needs Python 3, `make`, and a C++
-compiler (for example the Debian/Ubuntu `build-essential` package).
+compiler (for example the Debian/Ubuntu `build-essential` package). Install
+`zip` as well if clients will download directories.
 
 ### macOS
 
@@ -99,6 +104,9 @@ for the current shell only:
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ```
 
+All three uninstall adapters remove the managed service but deliberately leave
+configuration, tokens, credentials, histories, and logs for manual cleanup.
+
 ## Manual server start
 
 For development or troubleshooting, bypass the service adapters:
@@ -110,6 +118,7 @@ cp .env.example .env
 npm start
 ```
 
-Generate a credential separately with `npm run credential`. See
+Authenticate the chosen agent CLI on this host, then generate a credential
+separately with `npm run credential`. See
 `server/.env.example` for configuration and the handbook for production
 hardening.

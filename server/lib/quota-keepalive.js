@@ -50,7 +50,8 @@ function readClaudeFiveHour(report) {
 }
 
 // Keeps Claude Code's five-hour window cycling so the usage screen never has to
-// report "unknown". Mirrors what Codex gets for free from its header probe.
+// report "unknown". Codex learns its reset time from a separate minimal request;
+// neither provider request should be described as free of quota impact.
 function startClaudeQuotaKeepalive({
   readUsage = async () => readClaudeFiveHour(await getClaudeUsage()),
   prime = primeClaudeSession,

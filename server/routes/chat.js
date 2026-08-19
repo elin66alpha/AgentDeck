@@ -245,7 +245,8 @@ module.exports = function createChatRouter(ctx) {
   });
 
   // Clear one chat session's history plus resumable CLI session so the next message
-  // starts a new machine-side conversation. This does not touch files on disk.
+  // starts a new machine-side conversation. This does not touch project/worktree
+  // files; Relay state and the CLI transcript are removed on a best-effort basis.
   router.post('/api/session/clear', async (req, res) => {
     const agentKey = String(req.body.agent || '').trim();
     const requestedSessionId = String(req.body.sessionId || '').trim();

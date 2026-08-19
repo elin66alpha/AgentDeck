@@ -13,6 +13,8 @@ Relay 让 Claude Code、Codex、OpenCode 和 Hermes 继续运行在已经准备�
 shell 与登录态的机器上，再通过同一个 Flutter app 从手机、Web 或桌面重新连接这些本地
 CLI 智能体，不需要把项目搬到托管服务。
 
+Claude Code 与 Codex 是主要集成；OpenCode 与 Hermes 目前作为由主机管理的实验性集成提供。
+
 Relay 没有云端账号，也没有内置的默认后端。你自己运行 Node.js 后端、生成加密凭证，
 再把凭证导入信任的客户端。
 
@@ -28,28 +30,33 @@ flowchart LR
 - **实时智能体聊天。** 流式显示回复、取消任务、保留多段 agent 更新；切换会话后长任务
   仍可继续运行。
 - **常驻 agent 会话。** 每个 agent 在消息之间保持一个活的 CLI 会话，就像终端里那样：
-  后续回合省掉冷启动，取消只是打断本回合而不会结束对话，agent 在后台起的活儿到下一
-  回合还在跑。
+  后续回合省掉冷启动，取消只是打断本回合而不会结束对话。Claude、OpenCode 与 Hermes
+  的后台任务通常可以继续；Codex 因 sandbox 限制，需要让命令脱离到独立 session。
 - **命名会话。** 每个工作目录与 agent 最多有 8 个持久会话，聊天历史和运行状态可在
   多设备间同步。
+- **历史工具。** 可在当前工作目录中跨 agent、跨会话搜索，直接跳到命中的消息，并把
+  当前会话导出为 Markdown。
 - **Agent 状态与凭据有效期。** 查看四种 agent 的安装和认证状态，并显示 Claude Code
   与 Codex 的 OAuth 凭据还有几天到期、过期了几天，以便及时到后端主机上重新登录。
   四种 agent 的凭据都由后端主机管理。
+- **设备凭证管理。** 后端状态面板会列出设备 token 与最近使用信息，并支持先吊销、再
+  删除 token 记录。
 - **按 agent 配置。** 在输入区选择模型、思考深度和权限。Claude Code 与 Codex 还会
   显示默认关闭的快速模式；快速响应可能消耗更多额度或产生更高费用。
 - **Codex 动态目录。** 从已安装 Codex CLI 的结构化元数据读取模型与每个模型支持的
   思考档位，并提供安全的回退目录。
-- **蜂群。** 多个 agent 共享一份记录；每位成员可设置工作树、模型、思考深度、权限、
-  昵称和人设。用 `@` 召唤成员，同一条消息中的多个成员会基于同一快照并行运行；
+- **蜂群。** 多个 agent 共享一份记录和选定的工作树；每位成员可设置模型、思考深度、
+  权限、昵称和人设。用 `@` 召唤成员，同一条消息中的多个成员会基于同一快照并行运行；
   成员也可以在自己的回复里 `@` 队友把发言权交出去，并有上限防止两人无限互相召唤。
   蜂群还可保存和导入 JSON 模板。
 - **远程文件。** 浏览后端允许的绝对路径、切换工作目录、上传文件、下载文件或压缩文件夹。
-- **SSH 终端。** 从“管理凭证 → 进入SSH”打开当前后端机器上唯一且可恢复的终端；终端
-  使用后端系统用户运行，并跟随 app 的“白天/黑夜”外观。Web 端内置等宽终端字体，
-  避免 Chromium 中的字符横向间距过大。
+- **SSH 终端。** 从“管理凭证 → 进入SSH”打开当前后端机器上按设备 token 隔离、可恢复
+  的交互 shell。它并不连接主机的 SSH daemon，而是直接以后端系统用户运行 PTY。
+  Web 端内置等宽终端字体，避免 Chromium 中的字符横向间距过大。
 - **额度工作流。** 查看 Claude 与 Codex 额度；两者都可以预约在
   下一个检测到的 5 小时额度重置后自动发送一条消息。后端会用一次极小请求让 Claude
-  的 5 小时窗口持续滚动，重置时间不再显示为“未知”。
+  的 5 小时窗口持续滚动，避免空闲后丢失重置时间。Codex 额度探测与可选的 Claude
+  keepalive 都会向供应商发出小请求，可能消耗额度。
 - **通知。** 在线时使用本地/浏览器通知；配置后还可使用 Web Push 和 Android FCM。
 
 ## 快速开始
@@ -58,6 +65,8 @@ flowchart LR
 
 准备一台安装了 Node.js 18+ 的 Linux、macOS 或 Windows 主机，并至少安装一个支持的
 CLI。Claude 与 Codex 需要登录；OpenCode 与 Hermes 的 provider 配置在主机完成。
+Unix 主机下载文件夹时还需要 `zip`；Linux 还需要 PM2 和
+[后端说明](backends/README.zh-CN.md#前置要求)列出的本地编译工具。
 
 在仓库根目录运行后端系统对应的命令：
 
@@ -87,7 +96,7 @@ CLI。Claude 与 Codex 需要登录；OpenCode 与 Hermes 的 provider 配置在
 
 安装完成后会打印一张加密二维码，并在 `server/credentials/` 下保存 `.relay.png` /
 `.relay.json`。通过相机、图片/文件或粘贴 JSON 导入，再输入生成时设置的密码。每台设备
-应单独生成一份凭证。
+应单独生成一份凭证。相机扫描只在移动端提供；所有平台都支持导入图片/文件或粘贴 JSON。
 
 app 的首次连接页也内置了“部署后端”向导。
 
@@ -102,6 +111,8 @@ app 的首次连接页也内置了“部署后端”向导。
 - SSH 终端用该 token 换取短时、一次性的 WebSocket 票据，长期 bearer token 不会进入
   WebSocket 地址。
 - 凭证导出使用 PBKDF2-HMAC-SHA256 与 AES-256-GCM 加密。
+- 额度查询可能读取并刷新主机上的 Claude/Codex OAuth 文件，但 Relay API 不会返回
+  token 值。
 - 文件 API 会拒绝一组明确的 Relay、SSH、Claude 与 Codex 敏感路径，并可用
   `RELAY_FS_ROOTS` 进一步限制。
 - 错误 token 尝试会被限速。
@@ -116,6 +127,7 @@ Relay 不是沙箱：CLI 与 SSH 终端进程都拥有后端系统用户的权�
 flutter pub get
 flutter analyze --no-pub
 flutter test --no-pub
+npm --prefix server install
 npm --prefix server test
 ```
 

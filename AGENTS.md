@@ -25,7 +25,7 @@ flutter analyze --no-pub
 flutter test --no-pub
 flutter test --no-pub test/agent_controls_test.dart
 
-node --check server/server.js
+(cd server && git ls-files '*.js' | xargs -r node --check)
 npm --prefix server test
 npm --prefix server start
 
@@ -72,8 +72,9 @@ clients and bundles CanvasKit locally instead of depending on gstatic.
 
 - `server/lib/agents.js` is the process-runner boundary. Pass per-request state
   through `runAgent(..., { workdir, settings, sessionKey })`; do not add globals.
-- `server/lib/agent-options.js` owns option validation and exact CLI argv.
-  `server/lib/agent-settings.js` persists normalized solo-chat settings.
+- `server/lib/agent-options.js` owns option validation and the CLI, SDK, or
+  protocol representation of each setting. `server/lib/agent-settings.js`
+  persists normalized solo-chat settings.
 - No agent runs one process per turn. All four keep a live session that turns
   are fed into. Every pool is a *cache*: the stored session id stays
   authoritative, so any scope without a live session cold-starts by resuming it
@@ -105,8 +106,8 @@ clients and bundles CanvasKit locally instead of depending on gstatic.
   - `runAcpAgent` in `agents.js` is the shared runner for opencode and hermes,
     which differ only by their pool and their entries in the option tables.
 - Deleting or clearing a conversation goes through `purgeSession`, not
-  `clearSession`: for a pooled agent it also deletes the CLI-side transcript so
-  the conversation is really gone. Use `clearSession` only for the internal
+  `clearSession`: for a pooled agent it also requests CLI-side transcript
+  deletion on a best-effort basis. Use `clearSession` only for the internal
   stale-session retry.
 - Test files are `test/*.test.js`. Helper processes live in `test/fixtures/`,
   which the runner would otherwise try to execute as tests.
@@ -116,7 +117,7 @@ clients and bundles CanvasKit locally instead of depending on gstatic.
 - Codex models and model-specific reasoning levels come from structured CLI
   metadata, with bundled/cache/static fallbacks. Do not reintroduce binary
   string scanning for Codex model ids.
-- `describeAgent` and `getSettings` run on every option-picker open and every
+- `describeAgent` and `getSettings` are hot paths for option refreshes and every
   turn, so keep them free of subprocesses and per-call file reads.
   `model-discovery.js` re-locates a CLI at most once a minute and caches the
   result (including "not installed"); `agent-options.js` caches
@@ -126,10 +127,10 @@ clients and bundles CanvasKit locally instead of depending on gstatic.
   state. Claude and Codex require OAuth; OpenCode and Hermes credentials are
   managed on the host and become selectable when installed.
 - Every credential is created on the backend host by the CLI itself. Relay does
-  not log an agent in. It reads the credential files in `server/lib/agent-status.js`
-  for auth state and, for Claude and Codex, a `credentialExpiresAt` timestamp so
-  the app can count down to the next login. Read timestamps only; a token value
-  must never reach the API or the app.
+  not log an agent in. `server/lib/agent-status.js` reads auth state and, for
+  Claude and Codex, a `credentialExpiresAt` timestamp. `server/lib/usage.js`
+  separately reads and may refresh their OAuth credentials for quota reporting
+  and keepalive. A token value must never reach Relay's API or app.
 
 ### Backend modules and persistence
 
@@ -143,8 +144,8 @@ clients and bundles CanvasKit locally instead of depending on gstatic.
   rebuilding it in `server/lib/filesystem.js`.
 - New notifications should go through `server/lib/notify.js`, which fans out to
   configured Web Push and FCM channels.
-- Prompts are passed as one argv token and are capped by `PROMPT_MAX_BYTES`.
-  Preserve that validation in every chat path.
+- Chat prompt payloads and generated Swarm prompts are capped by
+  `PROMPT_MAX_BYTES`. Preserve that validation in every chat path.
 
 ### Client boundaries
 
@@ -183,9 +184,10 @@ clients and bundles CanvasKit locally instead of depending on gstatic.
 
 Generated files under `server/` include `.env`, `tokens.json`, credentials,
 agent/chat sessions, history, settings, groups, quota state/schedules, usage
-cache, and push/FCM stores. They are deployment state, not fixtures. Keep them
-out of patches and release archives. `server/models-extra.json` is also a local
-override, not a shared catalog.
+cache, and push/FCM stores. They are deployment state, not fixtures. Keep them,
+along with any referenced FCM service-account JSON, out of patches and release
+archives. `server/models-extra.json` is also a local override, not a shared
+catalog.
 
 ## Verification expectations
 
@@ -196,7 +198,9 @@ override, not a shared catalog.
 - Cross-stack API changes: verify both suites and keep old payload parsing safe
   when adding response fields.
 - Documentation changes: verify local Markdown links, commands, environment
-  names, and English/Chinese README parity against code rather than old docs.
+  names, English/Chinese README parity, and the embedded guides in
+  `getting_started_screen.dart` and `deploy_backend_screen.dart` against code
+  rather than old docs.
 - Release bumps touch four places, which drift apart if any is missed:
   `pubspec.yaml`, `server/package.json`, `_applicationVersion` in
   `lib/features/settings/app_settings_screen.dart`, and a `CHANGELOG.md` entry.

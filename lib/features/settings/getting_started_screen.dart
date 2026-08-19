@@ -133,7 +133,8 @@ const List<_GettingStartedStep> _zhSteps = <_GettingStartedStep>[
   ),
   _GettingStartedStep(
     title: '选择一个 CLI 智能体',
-    body: '打开左侧栏选择 agent。红绿状态灯表示安装和认证状态；可在“管理凭证”中登录兼容的 OAuth agent。',
+    body:
+        '打开左侧栏选择 agent。红绿状态灯表示安装和认证状态；所有 CLI 的登录或 provider 配置都要在后端主机上完成，然后可在“管理凭证”中重新检查状态。',
   ),
   _GettingStartedStep(
     title: '像发消息一样描述任务',
@@ -162,7 +163,7 @@ const List<_GettingStartedStep> _enSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: 'Choose a CLI agent',
     body:
-        'Open the left drawer and choose an agent. Red/green lights show installation and authentication; compatible OAuth agents can log in from Manage credentials.',
+        'Open the left drawer and choose an agent. Red/green lights show installation and authentication. Complete every CLI login or provider setup on the backend host, then recheck it from Manage credentials.',
   ),
   _GettingStartedStep(
     title: 'Describe the task like a message',

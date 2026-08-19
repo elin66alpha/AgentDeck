@@ -14,9 +14,8 @@ const os = require('os');
 // protocol (`codex app-server`). Both are JSON-RPC 2.0 on stdio, and in both one
 // process hosts *many* sessions (the working directory is chosen per session),
 // so a pool keeps a single process per agent and multiplexes every chat through
-// it. That matters: opencode costs ~360MB just to boot, and paying that once
-// instead of once per chat is the difference between three chats costing 1.5GB
-// and costing 750MB.
+// it. This pays each CLI's substantial startup cost once instead of once per
+// chat.
 //
 // This module owns everything the two protocols share — the process, the wire,
 // the session cap, idle eviction and cancellation — and takes a `driver` for the
@@ -27,9 +26,8 @@ const os = require('os');
 // session is evicted, the next turn re-opens it by resuming that id and behaves
 // exactly like the old per-turn model. A dead pool is never worse than no pool.
 const DEFAULT_IDLE_MS = 15 * 60 * 1000;
-// Live sessions per agent. opencode costs ~130MB per session on top of its
-// ~360MB base, so four is roughly the same memory ceiling as the Claude pool's
-// three processes.
+// Live sessions per agent. The cap bounds per-session resource growth while
+// still allowing several conversations to run independently.
 const DEFAULT_MAX_SESSIONS = 4;
 // After asking the agent to cancel, how long to wait for it to wind the turn
 // down before dropping the session. Cancel must never hang.
@@ -639,8 +637,8 @@ function createStdioAgentPool(options = {}) {
     });
   }
 
-  // Drop the live session for a scope. `purge` additionally deletes the agent's
-  // own stored transcript, so a session the user deleted can never be resumed.
+  // Drop the live session for a scope. With `purge`, also make a best-effort
+  // request to delete the agent's stored transcript.
   async function forget(key, opts = {}) {
     const entry = live.get(key);
     const sessionId = opts.sessionId || (entry && entry.sessionId) || null;

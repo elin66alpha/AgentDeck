@@ -12,8 +12,9 @@ const CLAUDE_MESSAGES_URL = 'https://api.anthropic.com/v1/messages';
 const CLAUDE_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 const CLAUDE_OAUTH_BETA = 'oauth-2025-04-20';
 const CLAUDE_API_VERSION = '2023-06-01';
-// The keepalive ping is billed like any other Claude Code turn, so it uses the
-// cheapest model and the smallest possible completion.
+// The keepalive ping is billed like any other Claude Code turn, so it uses a
+// low-cost default model and the smallest possible completion. Deployments can
+// override the model explicitly.
 const CLAUDE_KEEPALIVE_MODEL =
   process.env.CLAUDE_KEEPALIVE_MODEL || 'claude-haiku-4-5';
 const CLAUDE_CODE_SYSTEM_PROMPT =
@@ -358,8 +359,8 @@ async function getClaudeUsage() {
 // usage API reports `resets_at: null` until the next real turn, which the app can
 // only show as "unknown". Codex avoids that because its quota probe *is* a live
 // request; Claude's is a plain read, so we send the equivalent minimal turn
-// ourselves to restart the window. One token on the cheapest model, using the
-// same OAuth credential and Claude Code identity as the usage query above.
+// ourselves to restart the window. One token on the configured keepalive model,
+// using the same OAuth credential and Claude Code identity as the usage query.
 async function callClaudeMessages(token) {
   return httpJson('POST', CLAUDE_MESSAGES_URL, {
     Authorization: `Bearer ${token}`,

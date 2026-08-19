@@ -14,6 +14,9 @@ where your projects, shell, and credentials already live. It gives you one
 Flutter app for phone, Web, and desktop so you can reconnect to those local CLI
 agents without moving the projects to a hosted service.
 
+Claude Code and Codex are the primary integrations. OpenCode and Hermes are
+available as experimental host-managed integrations.
+
 There is no Relay cloud account or default backend. You run the Node.js backend,
 generate an encrypted credential, and import it into the clients you trust.
 
@@ -30,21 +33,27 @@ flowchart LR
   updates, and continue long work while switching between conversations.
 - **Persistent agent sessions.** Every agent keeps a live CLI session between
   messages, the way a terminal does, so follow-up turns skip the cold start,
-  cancelling a turn interrupts it instead of ending the conversation, and work an
-  agent starts in the background is still running on the next turn.
+  and cancelling a turn interrupts it instead of ending the conversation.
+  Background work survives normally for Claude, OpenCode, and Hermes; Codex
+  commands must detach into their own session because of its sandbox.
 - **Named conversations.** Each workdir and agent supports up to eight persistent
   sessions with shared cross-device history and running-state indicators.
+- **History tools.** Search the current workdir across agents and sessions, jump
+  to the matching message, and export the current conversation as Markdown.
 - **Agent status and credential expiry.** See installed/authenticated state for
   all four agents, plus how many days are left on the Claude Code and Codex
   OAuth credentials before you have to log in again on the backend host. All
   four agents' credentials stay host-managed.
+- **Device credential management.** A backend status panel lists device tokens,
+  last-use metadata, and lets you revoke a token before deleting its record.
 - **Per-agent controls.** Select model, reasoning effort, and permissions in the
   composer. Claude Code and Codex also have a Fast mode switch, off by default;
   fast responses may consume more quota or cost more.
 - **Live Codex catalog.** Relay reads structured model metadata and each model's
   supported reasoning levels from the installed Codex CLI, with safe fallbacks.
-- **Swarms.** Put several agents in one transcript, give each member a work tree,
-  model, effort, permission, nickname, and persona, then summon members with
+- **Swarms.** Put several agents in one transcript, choose their shared work
+  tree, give each member a model, effort, permission, nickname, and persona,
+  then summon members with
   `@mentions`. Multiple members run in parallel from one transcript snapshot, and
   members can hand the floor to each other by `@mentioning` a teammate in their
   own reply — bounded so a pair cannot loop forever. Swarms can be saved and
@@ -52,13 +61,15 @@ flowchart LR
 - **Remote files.** Browse absolute paths allowed by the backend, change the
   workdir, upload files, and download files or zipped folders.
 - **SSH terminal.** Open **Manage credentials → Enter SSH** for one resumable
-  terminal on the current backend machine. It runs as the backend OS user and
-  follows the app's Light/Dark appearance. Web bundles a terminal monospace
-  font so Chromium keeps normal horizontal character spacing.
+  interactive shell per device token on the current backend machine. It is not
+  a connection to the host SSH daemon: the PTY runs directly as the backend OS
+  user. Web bundles a terminal monospace font so Chromium keeps normal
+  horizontal character spacing.
 - **Quota workflows.** View Claude and Codex usage. Both can
   queue one prompt for the next detected five-hour reset. The backend keeps
   Claude's five-hour window cycling with a minimal request so its reset time is
-  never unknown.
+  not lost after an idle window. Codex usage probing and the optional Claude
+  keepalive both make small provider requests and can consume quota.
 - **Notifications.** Live local/browser alerts plus optional Web Push and Android
   FCM for configured deployments.
 
@@ -68,7 +79,9 @@ flowchart LR
 
 You need a Linux, macOS, or Windows machine with Node.js 18+ and at least one
 supported CLI installed. Claude and Codex must be logged in; OpenCode and
-Hermes provider setup is managed on that host.
+Hermes provider setup is managed on that host. Unix hosts also need `zip` for
+directory downloads; Linux needs PM2 plus the native build tools listed in the
+[backend guide](backends/README.md#requirements).
 
 From the repository root, run the setup for the backend OS:
 
@@ -99,8 +112,9 @@ details.
 
 Setup prints an encrypted QR and saves `.relay.png` / `.relay.json` under
 `server/credentials/`. Import it by camera scan, image/file selection, or pasted
-JSON, then enter the passphrase chosen during generation. Generate a separate
-credential for each device.
+JSON, then enter the passphrase chosen during generation. Camera scanning is
+mobile-only; every platform supports image/file or pasted-JSON import. Generate
+a separate credential for each device.
 
 The app's first connection screen also contains a **Deploy backend** walkthrough.
 
@@ -115,6 +129,8 @@ Swarm. The active workdir is stored per client and sent with every API request.
 - The SSH terminal uses a short-lived, single-use WebSocket ticket derived from
   that token; the long-lived bearer token is never placed in the socket URL.
 - Credential exports are encrypted with PBKDF2-HMAC-SHA256 and AES-256-GCM.
+- Quota reporting may read and refresh the Claude/Codex OAuth files on the host,
+  but token values are never returned by Relay's API.
 - The file API denies a specific set of Relay, SSH, Claude, and Codex secrets and
   can be restricted further with `RELAY_FS_ROOTS`.
 - Failed bearer-token attempts are rate-limited.
@@ -132,6 +148,7 @@ a backend outside a trusted network.
 flutter pub get
 flutter analyze --no-pub
 flutter test --no-pub
+npm --prefix server install
 npm --prefix server test
 ```
 

@@ -23,7 +23,8 @@ the backend OS user. A stable deployment should have all of the following:
 - Generate one credential per device. Revoke and delete old device tokens rather
   than sharing one token.
 - Keep `.env`, tokens, credential exports, CLI login state, push keys, history,
-  sessions, settings, groups, and quota state out of git and release archives.
+  sessions, settings, groups, quota state, and FCM service-account files out of
+  git and release archives.
 
 ### Reverse proxy requirements
 
@@ -55,7 +56,8 @@ backend user for the actual production boundary.
 
 Directory downloads are zipped and rejected if the tree would contain a denied
 path. Native uploads/downloads stream; Web downloads use a browser Blob and may
-hold the file in memory up to the configured cap.
+hold the file in memory up to the configured cap. Unix directory downloads call
+the host's `zip` command; Windows uses PowerShell `Compress-Archive`.
 
 ## Credentials and agent login
 
@@ -64,7 +66,7 @@ envelope containing the backend URL, machine identity, and one revocable device
 token. It uses PBKDF2-HMAC-SHA256 (600,000 iterations) and AES-256-GCM. The
 passphrase is prompted for interactively and is not saved. Unattended setups can
 supply it with `--passphrase` or `RELAY_CREDENTIAL_PASSPHRASE`, at the cost of
-exposing it to shell history or the process environment.
+exposing it to shell history, the process environment, or a launcher/config file.
 
 Useful commands from `server/`:
 
@@ -80,18 +82,29 @@ and pasted JSON. Native clients use platform secure storage. The Web client is
 subject to browser-origin storage security, so use a private profile on a
 trusted device.
 
+Generate a different credential for each device. The backend status panel lists
+their token ids, device metadata, and last-use time. Revoke a token before
+deleting its record; revocation also closes the terminal owned by that token.
+Generating another credential removes old export files but does not revoke
+tokens that were already issued.
+
 Relay reports separate installed, authenticated, and usable state for all four
-known agents. Every agent's credential is created on the backend host: Claude
-Code and Codex with their own `claude auth login` / `codex login`, OpenCode and
-Hermes with a provider key. Relay never logs a CLI in remotely.
+known agents. Claude Code and Codex are the primary integrations; OpenCode and
+Hermes are experimental. Every agent's credential or provider configuration is
+created on the backend host with that CLI's own flow. Relay never logs a CLI in
+remotely.
 
 For the two OAuth agents it also reads the expiry stored beside those
 credentials — `claudeAiOauth.expiresAt` in `~/.claude/.credentials.json`, and
 the `exp` claim of the `id_token` in `~/.codex/auth.json` — and reports it as
 `credentialExpiresAt` (epoch ms) on `/api/agents`. The app turns that into the
 days left, or the days since expiry, on the **Manage credentials** screen. Only
-the timestamp is read; token values never leave the backend. Agents whose
-credential carries no expiry report `null` and show no countdown.
+the status/expiry result is returned by this endpoint. Separately,
+`server/lib/usage.js` reads the Claude/Codex OAuth tokens for quota reporting
+and can refresh an expired access token atomically in the CLI's credential
+file. Token values are sent only to the provider's OAuth/API endpoints and
+never returned by Relay's API. Agents whose credential carries no expiry report
+`null` and show no countdown.
 
 ## SSH terminal
 
@@ -139,18 +152,20 @@ closed reloads into the same conversation on its next turn — the same behaviou
 as before, just slower for that one turn.
 
 Idle sessions are closed and there is a cap on how many stay live, because these
-processes are large (roughly 300 MB per Claude process, 360 MB for an opencode
-process plus about 130 MB per session, 90 MB for hermes). See `RELAY_CLAUDE_*`
-and `RELAY_AGENT_*` in `server/.env.example`. Turns past the cap wait for a slot.
-Hermes runs one turn at a time per process, so concurrent Hermes chats queue.
+processes can be resource-intensive. See `RELAY_CLAUDE_*` and `RELAY_AGENT_*`
+in `server/.env.example`. Defaults retain up to three Claude processes and four
+live JSON-RPC sessions per agent, with a 15-minute idle timeout. Turns past a
+cap wait for a slot.
 
 Work an agent starts in the background now outlives the turn that started it,
 except on Codex: its sandbox kills each command's process group as the command
 returns, so background work there survives only if it detaches into its own
 session (`setsid`).
 
-Deleting or clearing a conversation deletes the CLI-side transcript too, so a
-deleted conversation cannot be resumed and does not linger on disk.
+Deleting or clearing a conversation removes Relay's history and stored resume
+id, then asks the pooled integration to remove its CLI-side transcript. That
+last step is best effort because the external CLI can reject or fail deletion;
+inspect the host's CLI state if guaranteed erasure is required.
 
 ### Workdirs, conversations, and settings
 
@@ -184,14 +199,37 @@ Codex `serviceTier` on every turn. Availability still depends on
 the selected model, CLI version, account, and provider. Swarm storage can retain
 the field, but the current Swarm form exposes only model, effort, and permission.
 
+Claude settings are fixed for the life of its per-conversation SDK process, so
+a change restarts that process and resumes the same conversation. OpenCode and
+Hermes settings apply over ACP without restarting their shared process. Codex
+applies model, effort, and service tier per turn; changing its sandbox reopens
+the thread while resuming the same conversation, without respawning the shared
+app-server process.
+
 Codex model and reasoning choices come from the installed CLI's structured
 catalog and keep each model's advertised order/default. Updating Codex clears
 the discovery cache. Other agents use their supported live or fallback catalogs;
 local pins may be added in the gitignored `server/models-extra.json`.
 
+### History, search, and export
+
+Relay keeps raw chat messages in `server/chat-history.json`, capped at the most
+recent 200 messages in each conversation or Swarm scope. This file is backend
+state, not an encrypted archive, and can contain prompts, agent output, and
+sensitive project context. Protect it and any backups with the same care as the
+backend account.
+
+The client can search the current workdir across named sessions and agents, or
+limit the search to the current agent. The backend returns at most 50 matches;
+the client can jump to and highlight a result. Markdown export covers the
+current conversation. Search snippets and exported Markdown pass through
+Relay's targeted token-pattern redaction, but that filter is not a general
+secret scanner and does not alter the raw stored history.
+
 ### Swarms
 
 A Swarm is one canonical transcript above several independent CLI sessions.
+Each workspace can store up to 20 Swarms, with up to eight members in each.
 When a human message mentions multiple members, Relay snapshots the transcript
 once, builds a speaker-labelled delta for each member, and runs those members in
 parallel. Each member still serializes against its own private Swarm session.
@@ -219,11 +257,14 @@ prompt per source and workspace for the next detected five-hour reset.
 
 Claude's five-hour window only exists while it runs: once it lapses the usage API
 reports no reset time, which the app can only show as unknown. The backend keeps
-the window cycling by sending one minimal Claude Code request (cheapest model,
-one output token) whenever the window is idle, then sleeping until just after the
-new reset moment — the same effect Codex gets for free from its quota probe. Set
-`ENABLE_CLAUDE_KEEPALIVE=false` to turn it off and accept the unknown state;
-`CLAUDE_KEEPALIVE_MODEL` overrides the model used for the ping.
+the window cycling by sending one minimal Claude Code request (one output token)
+whenever the window is idle, then sleeping until just after the new reset
+moment. It is enabled by default, is billed like an ordinary provider request,
+and can consume quota. Set `ENABLE_CLAUDE_KEEPALIVE=false` to turn it off and
+accept the unknown state; `CLAUDE_KEEPALIVE_MODEL` overrides the model used for
+the ping. Codex quota discovery likewise sends a minimal Responses request to
+obtain rate-limit headers and can consume quota. Both usage paths may refresh
+the host's OAuth access token.
 
 Notification delivery has three layers:
 
@@ -240,8 +281,8 @@ do not have a configured offline push channel in this repository.
 All HTTP `/api/*` endpoints require the imported bearer token. The terminal
 WebSocket upgrade requires the short-lived ticket created by its HTTP endpoint.
 
-- Metadata/auth: health, agents, agent options/settings/version/update,
-  auth status, diagnostics, device tokens, and shared events.
+- Metadata/auth: health, client auth status, agents and their auth state, agent
+  options/settings/version/update, diagnostics, device tokens, and shared events.
 - Chat: chat, cancellation, history, history search/export, and clear session.
 - Named sessions: list/create, set active, and delete.
 - Files/workdir: current workdir, absolute directory browse, upload, and
@@ -268,7 +309,7 @@ npm start
 On Linux, `node-pty` compiles a native addon during `npm install`; install
 Python 3, `make`, and a C++ compiler first (for example `build-essential` on
 Debian/Ubuntu). macOS and Windows use the package's supported prebuilt binaries
-when available.
+when available. Unix hosts also need `zip` for directory downloads.
 
 To let the backend serve the Flutter Web client:
 

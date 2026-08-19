@@ -22,10 +22,11 @@ already use.
 The credential generator creates a `relay.credentials.v1` QR/JSON envelope with
 the machine id/name, backend URL, and one bearer token. The envelope uses
 PBKDF2-HMAC-SHA256 with 600,000 iterations plus AES-256-GCM with a random salt
-and nonce. Its passphrase is never written to disk. The generator prompts for it
-interactively; `--passphrase` and `RELAY_CREDENTIAL_PASSPHRASE` exist for
-unattended setup and should be avoided otherwise, because both leave the value
-readable in shell history or the process environment.
+and nonce. A passphrase entered at the interactive prompt is not saved by the
+generator. `--passphrase` and `RELAY_CREDENTIAL_PASSPHRASE` exist for unattended
+setup and should be avoided otherwise: the flag is visible in process listings
+and can persist in shell history, while the environment variable is visible to
+the process and can persist in `.env` or another launcher configuration.
 
 The backend stores bearer-token records and metadata in `server/tokens.json`.
 That file is a secret and is written owner-only. Native
@@ -40,7 +41,12 @@ Recommended practice:
 - revoke and delete a token when a device is lost or retired;
 - regenerate credentials after changing `PUBLIC_BASE_URL`;
 - never commit `.env`, tokens, credential exports, push keys, history, sessions,
-  agent settings, groups, or CLI login state.
+  agent settings, groups, CLI login state, or FCM service-account files.
+
+Generating a new credential deletes old QR/JSON export files, but it does not
+revoke previously issued device tokens. The backend status panel lists token
+ids, device metadata, and last-use time so each old token can be revoked and
+then deleted deliberately.
 
 ## API protections
 
@@ -64,10 +70,19 @@ Implemented controls include:
 - a startup warning when a routable public URL uses plaintext HTTP.
 
 Relay never logs a CLI agent in. Every agent's credential is created on the
-backend host with that CLI's own login command or provider key. Relay reads the
-credential files only to report whether an agent is authenticated and, for
-Claude Code and Codex, when the stored OAuth credential expires. Neither the
-API nor the app ever receives a token value.
+backend host with that CLI's own login flow or provider configuration.
+`server/lib/agent-status.js` reads authentication state and, for Claude Code and
+Codex, the stored OAuth expiry timestamp. `server/lib/usage.js` additionally
+reads their OAuth tokens for quota queries and can refresh an expired access
+token in the CLI's credential file. Token values may therefore be sent to the
+provider's OAuth and API endpoints, but neither Relay's API nor the app ever
+receives them.
+
+Quota reporting is not passive for every provider. Codex usage discovery sends
+a minimal Responses request to obtain quota headers. The enabled-by-default
+Claude keepalive sends a one-output-token request when its five-hour window is
+idle. Either request can consume provider quota; disable the latter with
+`ENABLE_CLAUDE_KEEPALIVE=false` if that tradeoff is unwanted.
 
 ## SSH terminal
 
@@ -117,7 +132,8 @@ limits the file API only; it does not change what a launched CLI can access.
 
 Uploads stream to a temporary file and default to 100 MB. Downloads default to
 300 MB. Configure smaller proxy and Relay limits when the deployment does not
-need those sizes.
+need those sizes. Unix directory downloads invoke the host's `zip` command;
+Windows uses PowerShell `Compress-Archive`.
 
 ## Production requirements
 

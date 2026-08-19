@@ -1,20 +1,20 @@
 'use strict';
 
-// Pure helpers for the group-chat orchestrator (see docs/group-chat.md). These
-// turn the canonical group transcript into the per-agent prompt material:
+// Pure helpers for the group-chat orchestrator (see docs/handbook.md, "Swarms").
+// These turn the canonical group transcript into per-agent prompt material:
 //
 //   * who authored a transcript message (attribution),
 //   * which agents a human message summons (@mention parsing),
 //   * the delta a given agent has not seen since it last spoke ("plan B"),
-//   * a speaker-labeled prompt for that delta, bounded to the argv size cap.
+//   * a speaker-labeled prompt for that delta, bounded to the prompt size cap.
 //
 // Keeping them pure (no I/O, no agent runners) makes the labeling — the part the
 // design calls out as what keeps attribution and tone correct — directly testable.
 
 const HUMAN_AUTHOR = 'human';
 
-// A group prompt rides to the CLI as one argv token like any other, so it must
-// stay under the same byte cap. Default leaves headroom below the 100KB chat cap.
+// A group prompt shares the ordinary chat byte budget. The default leaves
+// headroom below the 100KB request cap.
 const DEFAULT_MAX_PROMPT_BYTES = 96 * 1024;
 
 function slug(value) {
@@ -99,7 +99,7 @@ function lineFor(message, labelFor) {
 // optional `persona` line carrying the user's per-member work instructions, then
 // each delta message labeled with its speaker. Bounded to maxBytes by keeping the
 // most recent messages and noting any omission, so a long silence cannot produce
-// a prompt that exceeds the argv cap.
+// a prompt that exceeds the request budget.
 function buildGroupPrompt({
   selfLabel,
   persona,
@@ -160,8 +160,8 @@ function buildGroupPrompt({
 
   const body = kept.length > 0 ? kept.join('\n\n') : '(no new messages)';
   let prompt = `${header}\n\n${body}\n\n${footer}`;
-  // Defence in depth: a single oversized message can still blow the budget; hard
-  // cap the result so it always reaches the CLI rather than failing the spawn.
+  // Defence in depth: a single oversized message can still blow the budget;
+  // hard-cap the generated protocol payload before handing it to a runner.
   if (Buffer.byteLength(prompt, 'utf8') > maxBytes) {
     prompt = Buffer.from(prompt, 'utf8').subarray(0, maxBytes).toString('utf8');
   }

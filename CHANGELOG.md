@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.5 - 2026-07-27
+## 0.1.5 - Unreleased
 
 ### Removed
 
@@ -11,7 +11,7 @@
   `AGY_QUOTA_PROBE_TIMEOUT_MS`.
 - The browser-only OAuth login mode (`authMode` / `requiresCode` on the login
   SSE stream), which existed solely for Antigravity. Every remaining OAuth agent
-  uses the device-code flow.
+  now uses its own host-side login flow.
 - BTW side conversations, for Claude Code and Codex alike. This drops the
   `/api/btw` routes, the side-scope session keys and their transcripts, the
   BTW button and dialog in the app, and the session-forking each agent needed
@@ -41,7 +41,8 @@
 
 - The backend keeps Claude's five-hour quota window cycling with one minimal
   request whenever the window is idle, so its reset time is no longer reported
-  as unknown after a lapse. Set `ENABLE_CLAUDE_KEEPALIVE=false` to opt out.
+  as unknown after a lapse. The request can consume quota; set
+  `ENABLE_CLAUDE_KEEPALIVE=false` to opt out.
 - Linux service scripts (`start.sh`, `stop.sh`, `status.sh`, `uninstall.sh`)
   alongside the existing macOS and Windows sets.
 - An MIT `LICENSE` and a GitHub Actions workflow running the analyzer and both
@@ -88,9 +89,10 @@
   codex in local measurement), and cancelling interrupts the turn instead of
   killing the conversation. Replies now stream token by token for opencode and
   hermes as well — the old opencode path could only stream whole JSON lines and
-  hermes could not stream at all — and changing the model, reasoning effort or
-  permission tier applies to the live session without restarting anything.
-  No agent runs one process per turn any more.
+  hermes could not stream at all. OpenCode and Hermes apply settings over ACP;
+  Codex applies most settings per turn, while a sandbox change reopens and
+  resumes the thread without respawning the shared app-server process. No agent
+  runs one process per turn any more.
 
   Unlike Claude, one process per agent hosts *every* chat for it, because these
   protocols give each session its own work tree. That pays the CLI's startup
@@ -108,15 +110,20 @@
   Hermes. Codex is the exception: its sandbox kills the process group of each
   command as that command returns, so background work there survives only if it
   detaches into its own session (`setsid`).
-- Deleting or clearing a chat session now deletes the CLI-side transcript as
-  well, so a deleted conversation can no longer be resumed and no longer lingers
-  on disk. This covers all four agents.
+- Deleting or clearing a chat session now removes Relay history and its stored
+  resume id, then requests CLI-side transcript deletion for all four agents.
+  External CLI deletion remains best effort.
 - `server/.env.example` documents the remaining supported settings, including
   the state-file overrides and the keepalive retry interval.
 - The denylist that protects `tokens.json` now follows `RELAY_TOKENS_FILE`
   instead of assuming the default location.
 - Documented that the credential generator also accepts a passphrase from
   `--passphrase` or `RELAY_CREDENTIAL_PASSPHRASE`.
+
+### Fixed
+
+- Chat-history search now jumps to the matched message reliably and highlights
+  the search term after the destination conversation loads.
 
 ## 0.1.4 - 2026-07-13
 
