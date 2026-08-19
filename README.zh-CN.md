@@ -2,124 +2,145 @@
 
 # Relay
 
-**一个连接并控制自有机器上 AI 编程智能体的私有远程控制台。**
+**让 AI 编程智能体留在你的机器上，在任何屏幕上继续控制它们。**
 
-[English](README.md) · [后端安装](backends/README.zh-CN.md) ·
+一个连接 Claude Code、Codex、OpenCode 与 Hermes 的私有、自托管远程工作台。
+
+![Flutter 客户端](https://img.shields.io/badge/client-Flutter-02569B?logo=flutter&logoColor=white)
+![Node.js 后端](https://img.shields.io/badge/backend-Node.js_18%2B-339933?logo=node.js&logoColor=white)
+![自托管](https://img.shields.io/badge/deployment-self--hosted-5B5BD6)
+![MIT License](https://img.shields.io/badge/license-MIT-2F855A)
+
+[English](README.md) · [安装后端](backends/README.zh-CN.md) ·
 [安全模型](SECURITY.md) · [技术手册](docs/handbook.md)
 
 </div>
 
-Relay 让 Claude Code、Codex、OpenCode 和 Hermes 继续运行在已经准备好项目、
-shell 与登录态的机器上，再通过同一个 Flutter app 从手机、Web 或桌面重新连接这些本地
-CLI 智能体，不需要把项目搬到托管服务。
+<a href="assets/screenshots/relay-overview-web.png">
+  <img src="assets/screenshots/relay-overview-web.png" alt="Relay 首页，显示已连接的编程智能体、最近会话与多智能体蜂群" width="100%">
+</a>
 
-Claude Code 与 Codex 是主要集成；OpenCode 与 Hermes 目前作为由主机管理的实验性集成提供。
+Relay 把源代码、shell 权限和 CLI 登录凭据留在你控制的电脑上。手机、Web 与桌面共用
+一个 Flutter 客户端，连接运行在项目旁边的小型 Node.js 后端——没有 Relay 云账号，
+也没有托管中间层。
 
-Relay 没有云端账号，也没有内置的默认后端。你自己运行 Node.js 后端、生成加密凭证，
-再把凭证导入信任的客户端。
+<table>
+  <tr>
+    <td width="33%" align="center">🖥️<br><strong>代码在哪里，智能体就在哪里</strong><br>项目和智能体始终留在你的后端主机上。</td>
+    <td width="33%" align="center">📱<br><strong>一个客户端，覆盖所有屏幕</strong><br>手机、Web 与桌面使用一致的操作界面。</td>
+    <td width="33%" align="center">🔐<br><strong>从设计上保持私有</strong><br>每台设备导入独立、加密且可撤销的凭证。</td>
+  </tr>
+</table>
+
+## 60 秒看懂 Relay
+
+### 随时接回真实的编程会话
+
+流式查看回复、取消当前回合、搜索历史、导出 Markdown；切换页面后，任务仍可继续。
+每个 `工作目录 + agent` 最多支持 8 个可恢复的命名会话。
+
+<a href="assets/screenshots/relay-chat-web.png">
+  <img src="assets/screenshots/relay-chat-web.png" alt="Relay Web 客户端中的持久 Claude Code 会话" width="100%">
+</a>
+
+### 在手机上聊天、协作和管理文件
+
+<table>
+  <tr>
+    <td width="33%" align="center"><a href="assets/screenshots/relay-chat-mobile.png"><img src="assets/screenshots/relay-chat-mobile.png" alt="Relay 移动端智能体会话" width="100%"></a></td>
+    <td width="33%" align="center"><a href="assets/screenshots/relay-swarm-mobile.png"><img src="assets/screenshots/relay-swarm-mobile.png" alt="Relay 移动端多智能体蜂群" width="100%"></a></td>
+    <td width="33%" align="center"><a href="assets/screenshots/relay-files-mobile.png"><img src="assets/screenshots/relay-files-mobile.png" alt="Relay 移动端远程文件浏览器" width="100%"></a></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>持久会话</strong><br>从任意地点继续长时间运行的 agent 任务。</td>
+    <td align="center"><strong>多智能体蜂群</strong><br>让不同职责的 agent 在同一份记录中协作。</td>
+    <td align="center"><strong>远程文件</strong><br>浏览、上传、下载并切换当前工作树。</td>
+  </tr>
+</table>
+
+<sub>这些图片由 Chromium 连接隔离的演示后端截取，不包含生产凭据或真实项目数据。</sub>
+
+## 它是怎样连接起来的
 
 ```mermaid
 flowchart LR
-    C["手机 · Web · 桌面"] -->|"加密的设备凭证"| B["你自己的 Relay 后端"]
-    B --> A["Claude Code · Codex · OpenCode · Hermes"]
-    B --> F["你的项目和文件"]
+    C["Flutter 客户端<br/>手机 · Web · 桌面"]
+    R["Relay 后端<br/>运行在你的机器上的 Node.js"]
+    A["持久 agent 会话<br/>Claude · Codex · OpenCode · Hermes"]
+    F["项目与文件"]
+    T["可恢复 PTY shell"]
+
+    C -->|"已认证 HTTP + SSE"| R
+    R -->|"本地 CLI 协议"| A
+    R -->|"文件系统策略"| F
+    C -. "一次性 WebSocket 票据" .-> T
+    R --> T
 ```
 
-## 当前能力
+当前工作目录由每个客户端独立保存，并随每次请求发送。会话按
+`工作目录 + agent + session` 隔离，因此互不相关的会话可以并行运行，后端不依赖一个
+全局工作目录。
 
-- **实时智能体聊天。** 流式显示回复、取消任务、保留多段 agent 更新；切换会话后长任务
-  仍可继续运行。
-- **常驻 agent 会话。** 每个 agent 在消息之间保持一个活的 CLI 会话，就像终端里那样：
-  后续回合省掉冷启动，取消只是打断本回合而不会结束对话。Claude、OpenCode 与 Hermes
-  的后台任务通常可以继续；Codex 因 sandbox 限制，需要让命令脱离到独立 session。
-- **命名会话。** 每个工作目录与 agent 最多有 8 个持久会话，聊天历史和运行状态可在
-  多设备间同步。
-- **历史工具。** 可在当前工作目录中跨 agent、跨会话搜索，直接跳到命中的消息，并把
-  当前会话导出为 Markdown。
-- **Agent 状态与凭据有效期。** 查看四种 agent 的安装和认证状态，并显示 Claude Code
-  与 Codex 的 OAuth 凭据还有几天到期、过期了几天，以便及时到后端主机上重新登录。
-  四种 agent 的凭据都由后端主机管理。
-- **设备凭证管理。** 后端状态面板会列出设备 token 与最近使用信息，并支持先吊销、再
-  删除 token 记录。
-- **按 agent 配置。** 在输入区选择模型、思考深度和权限。Claude Code 与 Codex 还会
-  显示默认关闭的快速模式；快速响应可能消耗更多额度或产生更高费用。
-- **Codex 动态目录。** 从已安装 Codex CLI 的结构化元数据读取模型与每个模型支持的
-  思考档位，并提供安全的回退目录。
-- **蜂群。** 多个 agent 共享一份记录和选定的工作树；每位成员可设置模型、思考深度、
-  权限、昵称和人设。用 `@` 召唤成员，同一条消息中的多个成员会基于同一快照并行运行；
-  成员也可以在自己的回复里 `@` 队友把发言权交出去，并有上限防止两人无限互相召唤。
-  蜂群还可保存和导入 JSON 模板。
-- **远程文件。** 浏览后端允许的绝对路径、切换工作目录、上传文件、下载文件或压缩文件夹。
-- **SSH 终端。** 从“管理凭证 → 进入SSH”打开当前后端机器上按设备 token 隔离、可恢复
-  的交互 shell。它并不连接主机的 SSH daemon，而是直接以后端系统用户运行 PTY。
-  Web 端内置等宽终端字体，避免 Chromium 中的字符横向间距过大。
-- **额度工作流。** 查看 Claude 与 Codex 额度；两者都可以预约在
-  下一个检测到的 5 小时额度重置后自动发送一条消息。后端会用一次极小请求让 Claude
-  的 5 小时窗口持续滚动，避免空闲后丢失重置时间。Codex 额度探测与可选的 Claude
-  keepalive 都会向供应商发出小请求，可能消耗额度。
-- **通知。** 在线时使用本地/浏览器通知；配置后还可使用 Web Push 和 Android FCM。
+## 你可以做什么
+
+| | 能力 | 带来的体验 |
+|---|---|---|
+| 💬 | **实时、持久会话** | 流式回复、取消任务、命名会话、跨设备历史、搜索与 Markdown 导出。 |
+| 🐝 | **多智能体蜂群** | 共享记录、独立角色和参数、并行波次、有限的 `@mention` 接力与可复用 JSON 模板。 |
+| 🎛️ | **Agent 控制** | 模型、思考深度、权限、安装/认证状态、凭据到期倒计时，以及 Claude/Codex 快速模式。 |
+| 📁 | **文件与终端** | 受策略约束的浏览、上传、下载、文件夹压缩、工作目录切换，以及每个设备凭证一条可恢复 PTY。 |
+| 📊 | **额度工作流** | 查看 Claude/Codex 用量，并预约一条消息在下一个检测到的 5 小时额度重置后发送。 |
+| 🔔 | **通知** | App/浏览器提醒；配置后还可使用 Web Push 与 Android FCM。 |
+
+Claude Code 与 Codex 是主要集成；OpenCode 与 Hermes 目前是由主机管理的实验性集成。
+四种 agent 的凭据都保留在后端主机上，Relay 不会代替你登录。
 
 ## 快速开始
 
-### 1. 准备后端
+### 1. 准备后端主机
 
-准备一台安装了 Node.js 18+ 的 Linux、macOS 或 Windows 主机，并至少安装一个支持的
-CLI。Claude 与 Codex 需要登录；OpenCode 与 Hermes 的 provider 配置在主机完成。
-Unix 主机下载文件夹时还需要 `zip`；Linux 还需要 PM2 和
-[后端说明](backends/README.zh-CN.md#前置要求)列出的本地编译工具。
+在 Linux、macOS 或 Windows 主机安装 Node.js 18+ 和至少一个支持的 CLI。Claude 与
+Codex 需要事先在这台主机登录；OpenCode 与 Hermes 使用主机上管理的 provider 配置。
 
-在仓库根目录运行后端系统对应的命令：
+在仓库根目录执行对应系统的安装命令：
 
-```bash
-./backends/linux/setup.sh
-```
+| 后端系统 | 安装命令 |
+|---|---|
+| Linux | `./backends/linux/setup.sh` |
+| macOS | `./backends/macos/setup.sh` |
+| Windows PowerShell | `.\backends\windows\setup.ps1` |
 
-```bash
-./backends/macos/setup.sh
-```
+安装器会引导你选择直连、正式 Cloudflare Tunnel 或临时 Quick Tunnel。直连服务公开
+暴露前必须配置 HTTPS。Linux 还需要 PM2 和
+[后端前置要求](backends/README.zh-CN.md#前置要求)列出的本地工具；Unix 主机下载文件夹
+时需要 `zip`。
 
-```powershell
-.\backends\windows\setup.ps1
-```
+### 2. 导入加密设备凭证
 
-安装器提供三种网络模式：
+安装程序会打印加密二维码，并在 `server/credentials/` 下写入 `.relay.png` /
+`.relay.json`。通过相机、图片/文件或粘贴 JSON 导入，再输入生成时设置的密码。相机
+扫描仅移动端支持；所有客户端都可以导入文件或粘贴 JSON。建议为每台设备生成一份可
+独立撤销的凭证。
 
-| 模式 | 适合场景 | 重要说明 |
-|---|---|---|
-| 直连 | 自有公网地址或反向代理 | 公开暴露前必须使用 HTTPS。 |
-| 正式 Cloudflare Tunnel | 稳定的个人部署 | 需要 Cloudflare zone 和 `cloudflared`。 |
-| Cloudflare Quick Tunnel | 短期试用 | 重启后 URL 可能变化。 |
+### 3. 选择项目并开始工作
 
-服务命令和各平台细节见 [backends/README.zh-CN.md](backends/README.zh-CN.md)。
+选择后端、设置工作目录，然后打开 agent 会话或蜂群。服务命令、网络配置与各平台说明
+见[后端安装指南](backends/README.zh-CN.md)。
 
-### 2. 导入设备凭证
+## 安全边界
 
-安装完成后会打印一张加密二维码，并在 `server/credentials/` 下保存 `.relay.png` /
-`.relay.json`。通过相机、图片/文件或粘贴 JSON 导入，再输入生成时设置的密码。每台设备
-应单独生成一份凭证。相机扫描只在移动端提供；所有平台都支持导入图片/文件或粘贴 JSON。
+- 所有 HTTP API 都需要可撤销的 bearer token；错误凭证尝试会被限速。
+- 凭证导出使用 PBKDF2-HMAC-SHA256 与 AES-256-GCM。
+- 终端先用 bearer token 换取短时、一次性的 WebSocket 票据，长期 token 不会进入
+  socket 地址。
+- 文件 API 会拒绝已知的 Relay、SSH、Claude 与 Codex 敏感路径，还可用
+  `RELAY_FS_ROOTS` 进一步收紧。
+- 额度查询可能读取并刷新主机 OAuth 文件，但 token 值绝不会进入 Relay API 或客户端。
 
-app 的首次连接页也内置了“部署后端”向导。
-
-### 3. 选择工作目录与 agent
-
-选择机器、设置后端工作目录，然后打开 agent 会话或蜂群。当前工作目录保存在每个客户端
-本地，并随每次 API 请求发送。
-
-## 安全摘要
-
-- 所有 HTTP API 都需要可撤销的 bearer token。
-- SSH 终端用该 token 换取短时、一次性的 WebSocket 票据，长期 bearer token 不会进入
-  WebSocket 地址。
-- 凭证导出使用 PBKDF2-HMAC-SHA256 与 AES-256-GCM 加密。
-- 额度查询可能读取并刷新主机上的 Claude/Codex OAuth 文件，但 Relay API 不会返回
-  token 值。
-- 文件 API 会拒绝一组明确的 Relay、SSH、Claude 与 Codex 敏感路径，并可用
-  `RELAY_FS_ROOTS` 进一步限制。
-- 错误 token 尝试会被限速。
-- 公网部署应终止 TLS，并使用权限受限的非 root 系统用户运行 Relay。
-
-Relay 不是沙箱：CLI 与 SSH 终端进程都拥有后端系统用户的权限。对外暴露前请阅读
-[SECURITY.md](SECURITY.md) 与[生产部署清单](docs/handbook.md#production-deployment)。
+> [!IMPORTANT]
+> Relay 不是沙箱。Agent 和终端进程拥有后端系统用户的权限。请使用受限的非 root 用户
+> 运行，公网部署时终止 TLS，并先阅读 [SECURITY.md](SECURITY.md) 和
+> [生产部署清单](docs/handbook.md#production-deployment)。
 
 ## 开发
 
@@ -138,26 +159,19 @@ flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn
 npm --prefix server start
 ```
 
-项目包含 Windows、macOS、Linux 桌面 runner。Windows release 已实际验证；macOS/Linux
-打包和安全存储验证仍不如 Windows 成熟。详见[技术手册](docs/handbook.md#development-and-builds)。
-
-## 项目结构
+Web 参数会有意禁用 service worker，并在本地打包 CanvasKit。Windows release 已实际
+验证；macOS/Linux 桌面打包和安全存储验证成熟度较低。详见
+[开发手册](docs/handbook.md#development-and-builds)。
 
 ```text
 Relay/
 ├── lib/          共享 Flutter 客户端
 ├── server/       Node.js 后端与测试
 ├── backends/     各系统安装和服务管理适配
-├── assets/       图标与界面资源
-├── docs/         长期运维和架构手册
-├── scripts/      开发与部署脚本
+├── docs/         运维与架构手册
+├── scripts/      开发、部署与截图工具
 └── test/         Flutter 测试
 ```
 
 贡献者和编程 agent 请先阅读 [AGENTS.md](AGENTS.md)，版本记录见
-[CHANGELOG.md](CHANGELOG.md)。GitHub Actions 会在 pull request 上运行静态分析和
-两套测试。
-
-## 许可证
-
-Relay 使用 [MIT License](LICENSE) 发布。
+[CHANGELOG.md](CHANGELOG.md)。Relay 使用 [MIT License](LICENSE) 发布。
