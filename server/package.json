@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "test": "node --test \"test/*.test.js\"",
+    "test": "node scripts/run-tests.js",
     "credential": "node scripts/create-credential.js"
   },
   "dependencies": {
