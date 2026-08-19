@@ -1,20 +1,20 @@
 'use strict';
 
-// Pure helpers for the group-chat orchestrator (see docs/group-chat.md). These
-// turn the canonical group transcript into the per-agent prompt material:
+// Pure helpers for the group-chat orchestrator (see docs/handbook.md, "Swarms").
+// These turn the canonical group transcript into per-agent prompt material:
 //
 //   * who authored a transcript message (attribution),
 //   * which agents a human message summons (@mention parsing),
 //   * the delta a given agent has not seen since it last spoke ("plan B"),
-//   * a speaker-labeled prompt for that delta, bounded to the argv size cap.
+//   * a speaker-labeled prompt for that delta, bounded to the prompt size cap.
 //
 // Keeping them pure (no I/O, no agent runners) makes the labeling — the part the
 // design calls out as what keeps attribution and tone correct — directly testable.
 
 const HUMAN_AUTHOR = 'human';
 
-// A group prompt rides to the CLI as one argv token like any other, so it must
-// stay under the same byte cap. Default leaves headroom below the 100KB chat cap.
+// A group prompt shares the ordinary chat byte budget. The default leaves
+// headroom below the 100KB request cap.
 const DEFAULT_MAX_PROMPT_BYTES = 96 * 1024;
 
 function slug(value) {
@@ -94,23 +94,39 @@ function lineFor(message, labelFor) {
 }
 
 // Build the prompt handed to the agent taking the floor: a header that states it
-// is in a group and it is now its turn, an optional `persona` line carrying the
-// user's per-member work instructions, then each delta message labeled with its
-// speaker. Bounded to maxBytes by keeping the most recent messages and noting any
-// omission, so a long silence cannot produce a prompt that exceeds the argv cap.
+// is in a group and it is now its turn, the `roster` of members it may summon
+// (already excluding itself; empty when agent-to-agent summoning is off), an
+// optional `persona` line carrying the user's per-member work instructions, then
+// each delta message labeled with its speaker. Bounded to maxBytes by keeping the
+// most recent messages and noting any omission, so a long silence cannot produce
+// a prompt that exceeds the request budget.
 function buildGroupPrompt({
   selfLabel,
   persona,
   delta,
   labelFor,
+  roster,
   maxBytes = DEFAULT_MAX_PROMPT_BYTES,
 }) {
   const name = String(selfLabel || 'this agent');
   const role = typeof persona === 'string' ? persona.trim() : '';
+  // Summoning only happens if the agent knows it can, and knows the exact token
+  // that resolves. Each entry is `Label (@key)`: the key always parses, while a
+  // nickname only does when it is a single word.
+  const others = (Array.isArray(roster) ? roster : [])
+    .filter((member) => member && member.key)
+    .map((member) => `${member.label || member.key} (@${member.key})`);
+  const rosterLine = others.length
+    ? `\n\nOther members of this swarm: ${others.join(', ')}. ` +
+      'Mentioning one of them by that @name hands them the floor once you ' +
+      'finish, and they will see this exchange. Only do it when you actually ' +
+      'need them; say nothing of the sort to end the exchange.'
+    : '';
   const header =
     `You are "${name}" in a group chat with a human and possibly other AI agents. ` +
     'Each line below is prefixed with its speaker. Reply only as yourself, ' +
     'addressing the conversation; it is now your turn to respond.' +
+    rosterLine +
     (role ? `\n\nYour role in this swarm: ${role}` : '');
   const footer = `(It is now your turn, ${name}.)`;
   const omitted = '[earlier messages omitted]';
@@ -144,8 +160,8 @@ function buildGroupPrompt({
 
   const body = kept.length > 0 ? kept.join('\n\n') : '(no new messages)';
   let prompt = `${header}\n\n${body}\n\n${footer}`;
-  // Defence in depth: a single oversized message can still blow the budget; hard
-  // cap the result so it always reaches the CLI rather than failing the spawn.
+  // Defence in depth: a single oversized message can still blow the budget;
+  // hard-cap the generated protocol payload before handing it to a runner.
   if (Buffer.byteLength(prompt, 'utf8') > maxBytes) {
     prompt = Buffer.from(prompt, 'utf8').subarray(0, maxBytes).toString('utf8');
   }

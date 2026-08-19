@@ -931,25 +931,6 @@ class BackendClient {
     );
   }
 
-  /// Send a /btw side question. Always streams; the backend forks the main
-  /// conversation's session so the answer has its memory without disturbing it.
-  Future<ChatReply> sendBtwMessage({
-    required String agentKey,
-    required String sessionId,
-    required String prompt,
-    required String requestId,
-    required void Function(BackendEvent event) onEvent,
-  }) {
-    return _sendMessageStreamed(
-      agentKey: agentKey,
-      sessionId: sessionId,
-      prompt: prompt,
-      requestId: requestId,
-      onEvent: onEvent,
-      path: '/api/btw',
-    );
-  }
-
   Future<ChatReply> _sendMessageStreamed({
     required String agentKey,
     required String sessionId,
@@ -1206,36 +1187,6 @@ class BackendClient {
     return _decodeHistoryMessages(response.body);
   }
 
-  /// Fetches the /btw side conversation tied to the given main session.
-  Future<List<ChatMessage>> fetchBtwHistory(
-    String agentKey, {
-    required String sessionId,
-  }) async {
-    final String query = 'agent=${Uri.encodeQueryComponent(agentKey)}'
-        '&sessionId=${Uri.encodeQueryComponent(sessionId)}';
-    final Object? decoded =
-        await _requestJson('GET', '/api/btw/history?$query');
-    if (decoded is! Map) {
-      throw BackendException('Invalid btw history response.');
-    }
-    final List<Object?> raw = decoded['messages'] is List
-        ? (decoded['messages'] as List).cast<Object?>()
-        : const <Object?>[];
-    return raw
-        .whereType<Map>()
-        .map((Map item) => ChatMessage.fromJson(item.cast<String, Object?>()))
-        .toList(growable: false);
-  }
-
-  /// Resets the /btw side conversation so the next question re-forks the main one.
-  Future<void> clearBtw(String agentKey, String sessionId) async {
-    await _requestJson(
-      'POST',
-      '/api/btw/clear',
-      body: <String, Object?>{'agent': agentKey, 'sessionId': sessionId},
-    );
-  }
-
   // --- Group chat (multi-agent) ---------------------------------------------
 
   List<ChatGroup> _groupsFrom(Object? decoded) {
@@ -1400,7 +1351,7 @@ class BackendClient {
 
   /// Best-effort login state per agent so the app can warn before sending a
   /// message. Maps agentKey -> loggedIn, where the value is true/false when the
-  /// backend can read the CLI's credentials, or null when it cannot tell (agy).
+  /// backend can read the CLI's credentials, or null when it cannot tell.
   Future<Map<String, bool?>> fetchAuthStatus() async {
     final Object? decoded = await _requestJson('GET', '/api/auth/status');
     final Map<String, bool?> result = <String, bool?>{};
@@ -1429,40 +1380,6 @@ class BackendClient {
         .whereType<Map>()
         .map((Map item) => CliAgent.fromJson(item.cast<String, Object?>()))
         .toList(growable: false);
-  }
-
-  Stream<BackendEvent> streamAgentLogin(String agentKey) async* {
-    final MachineCredential credential = await _requireCredential();
-    final http.Request request = http.Request(
-      'GET',
-      _uri(
-        credential,
-        '/api/agent-auth/login/start?agent=${Uri.encodeQueryComponent(agentKey)}',
-      ),
-    );
-    request.headers.addAll(
-      await _headers(credential, accept: 'text/event-stream'),
-    );
-
-    final http.StreamedResponse response = await _httpClient.send(request);
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      final String text = await response.stream.bytesToString();
-      throw _exceptionFor(response.statusCode, text);
-    }
-
-    yield* decodeSse(response.stream);
-  }
-
-  Future<void> submitAgentLoginCode({
-    required String sessionId,
-    required String code,
-  }) async {
-    await _requestJson(
-      'POST',
-      '/api/agent-auth/login/code',
-      body: <String, Object?>{'sessionId': sessionId, 'code': code},
-      timeout: const Duration(seconds: 20),
-    );
   }
 
   /// Catalog of selectable model/effort/permission/fast options for an agent.

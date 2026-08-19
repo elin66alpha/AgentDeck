@@ -58,21 +58,34 @@ restart_pm2_app() {
   pm2 start "$PM2_ECOSYSTEM" --only "$PM2_APP_NAME" --update-env
 }
 
+# /api/health sits behind requireAuth and this script holds no device token, so
+# the healthy answer here is 401, not 200 — any HTTP status proves the process is
+# listening and Express is serving. Only a connection failure (curl reports 000)
+# or a 5xx means the backend is not back yet. Polling with a bad token also costs
+# one of the 15 auth failures per minute the brute-force guard allows, which is
+# another reason this must pass on the first try rather than by retrying.
 wait_for_health() {
   if ! command -v curl >/dev/null 2>&1; then
     printf '\n==> curl not found; skipped health check for %s\n' "$HEALTH_URL"
     return
   fi
-  printf '\n==> waiting for backend health: %s\n' "$HEALTH_URL"
+  printf '\n==> waiting for backend to answer: %s\n' "$HEALTH_URL"
+  local status
   for attempt in {1..20}; do
-    if curl -fsS "$HEALTH_URL" >/dev/null; then
-      printf 'Backend is healthy.\n'
-      return
-    fi
-    printf 'backend not ready yet (%s/20)\n' "$attempt"
+    status="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$HEALTH_URL" || true)"
+    case "$status" in
+      000|'' | 5??)
+        printf 'backend not ready yet (%s/20, HTTP %s)\n' "$attempt" "${status:-none}"
+        ;;
+      *)
+        printf 'Backend is up (HTTP %s).\n' "$status"
+        return
+        ;;
+    esac
     sleep 1
   done
-  printf 'Backend did not pass health check at %s\n' "$HEALTH_URL" >&2
+  printf 'Backend did not answer at %s (last status: %s)\n' \
+    "$HEALTH_URL" "${status:-none}" >&2
   exit 1
 }
 

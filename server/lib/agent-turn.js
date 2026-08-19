@@ -356,7 +356,7 @@ async function runAgentTurn(options) {
         awaitingFirstToken: false,
         // Keep the turn's progress/step lines instead of wiping them so the app
         // can fold them into a collapsed "thinking" area on the finished bubble
-        // (otherwise codex/agy's execution summary vanishes the moment it ends).
+        // (otherwise codex's execution summary vanishes the moment it ends).
         progressLines: Array.isArray(message.metadata.progressLines)
           ? message.metadata.progressLines
           : [],

@@ -36,8 +36,8 @@ class AppStrings {
   String get notConnected => isZh ? '未连接机器' : 'No machine connected';
   String get manageCredentials => isZh ? '管理凭证' : 'Manage credentials';
   String get manageCredentialsHomeHint => isZh
-      ? '登录 CLI 智能体或配置 Hermes API key'
-      : 'Log in CLI agents or configure a Hermes API key';
+      ? '查看 CLI 智能体状态与凭据有效期'
+      : 'Check CLI agent status and credential expiry';
   String get cliAgents => isZh ? 'CLI 智能体' : 'CLI agents';
   String get groupChat => isZh ? '蜂群' : 'Swarm';
   String get groupChatSubtitle => isZh ? '多智能体蜂群协作' : 'Multi-agent swarm';
@@ -299,36 +299,23 @@ class AppStrings {
   }
 
   String get recheck => isZh ? '重新检查' : 'Recheck';
-  String get login => isZh ? '登录' : 'Log in';
-  String get loginAgain => isZh ? '重新登录' : 'Log in again';
   String get optionalApiKey => isZh ? 'API key 可选' : 'API key optional';
   String get keyManagedOnHost => isZh ? '在主机上配置' : 'Configured on host';
   String get agentReady => isZh ? '已就绪' : 'Ready';
   String get copy => isZh ? '复制' : 'Copy';
   String get copied => isZh ? '已复制。' : 'Copied.';
-  String agentLoginTitle(String agent) =>
-      isZh ? '登录 $agent' : 'Log in to $agent';
-  String get agentLoginStarting =>
-      isZh ? '正在启动 CLI 登录...' : 'Starting CLI login...';
-  String get agentLoginWaitingForUrl => isZh
-      ? '等待 CLI 输出授权链接。'
-      : 'Waiting for the CLI to print an authorization URL.';
-  String get agentLoginOpenUrl => isZh
-      ? '在浏览器中打开此链接，完成授权后把代码粘贴回来。'
-      : 'Open this link in a browser, authorize, then paste the code here.';
-  String get agentLoginBrowserOpenUrl => isZh
-      ? '在浏览器中打开此链接。完成授权后，状态会自动更新。'
-      : 'Open this link in a browser. Status will update after authorization finishes.';
-  String get agentLoginCode => isZh ? '授权代码' : 'Authorization code';
-  String get agentLoginCodeHint =>
-      isZh ? '粘贴 CLI 要求的代码' : 'Paste the code requested by the CLI';
-  String get agentLoginSubmit => isZh ? '提交代码' : 'Submit code';
-  String get agentLoginSubmitting => isZh ? '正在提交代码...' : 'Submitting code...';
-  String get agentLoginDone =>
-      isZh ? '登录完成。状态会在刷新后更新。' : 'Login complete. Status will refresh.';
-  String get agentLoginOutput => isZh ? 'CLI 输出' : 'CLI output';
-  String agentLoginFailed(Object err) =>
-      isZh ? '登录失败：$err' : 'Login failed: $err';
+  String credentialExpiresInDays(int days) => isZh
+      ? '还有 $days 天需要重新登录'
+      : 'Log in again in $days ${days == 1 ? 'day' : 'days'}';
+  String get credentialExpiresToday =>
+      isZh ? '今天之内需要重新登录' : 'Log in again within a day';
+  String credentialExpiredDays(int days) => isZh
+      ? '已过期 $days 天，请立即在后端主机重新登录'
+      : 'Expired $days ${days == 1 ? 'day' : 'days'} ago. '
+          'Log in again on the backend host.';
+  String get credentialExpiredToday => isZh
+      ? '凭据已过期，请立即在后端主机重新登录'
+      : 'Credential expired. Log in again on the backend host.';
   String agentStatusRefreshFailed(Object err) =>
       isZh ? '刷新智能体状态失败：$err' : 'Agent status refresh failed: $err';
   String get importCredential => isZh ? '导入凭证' : 'Import credential';
@@ -427,18 +414,6 @@ class AppStrings {
   String get agentThinking => isZh ? '思考过程' : 'Thinking';
   String agentSteps(int count) =>
       isZh ? '执行步骤 · $count 条' : '$count ${count == 1 ? 'step' : 'steps'}';
-  String get btwTitle => isZh ? 'BTW 副手' : 'BTW sidekick';
-  String get btwSubtitle => isZh
-      ? '基于当前对话记忆的只读旁支问答，不影响主任务'
-      : 'Read-only side questions with the current chat\'s memory';
-  String get btwHint => isZh ? '问一个旁支问题…' : 'Ask a side question…';
-  String get btwTooltip => isZh ? 'BTW 旁支提问' : 'Ask a side question (BTW)';
-  String get btwNeedsConversation =>
-      isZh ? '先发送一条消息再使用 BTW' : 'Send a message first to use BTW';
-  String get btwClearTitle => isZh ? '清空 BTW' : 'Clear BTW';
-  String get btwEmpty => isZh
-      ? '在这里向副手提问，它了解当前主对话的内容。'
-      : 'Ask the sidekick here — it knows the current conversation.';
   String startChat(String agent) =>
       isZh ? '与 $agent 开始对话' : 'Start chatting with $agent';
   String get chooseConversationTarget => isZh
@@ -510,8 +485,8 @@ class AppStrings {
   String get licenseText => isZh ? '私有本地工具。' : 'Private local tool.';
   String get copyright => isZh ? '© 2026 Relay' : '© 2026 Relay';
   String get aboutDescription => isZh
-      ? '用于连接本机 Claude Code、Codex、Antigravity、OpenCode 和 Hermes CLI 智能体的私有控制台。'
-      : 'Private control surface for local Claude Code, Codex, Antigravity, OpenCode, and Hermes CLI agents.';
+      ? '用于连接本机 Claude Code、Codex、OpenCode 和 Hermes CLI 智能体的私有控制台。'
+      : 'Private control surface for local Claude Code, Codex, OpenCode, and Hermes CLI agents.';
   String get language => isZh ? '语言' : 'Language';
   String get appearance => isZh ? '外观' : 'Appearance';
   String get online => isZh ? '在线' : 'Online';

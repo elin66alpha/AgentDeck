@@ -65,7 +65,13 @@ module.exports = function createMetaRouter(ctx) {
           installed,
           authed,
           authKind: status.authKind || 'unknown',
-          // claude/codex/agy (oauth) gate on login; hermes/opencode are managed
+          // Epoch ms at which the stored OAuth credential runs out, so the app
+          // can say how many days are left before a login on the host is due.
+          // null for agents whose credential carries no expiry.
+          credentialExpiresAt: Number.isFinite(status.credentialExpiresAt)
+            ? status.credentialExpiresAt
+            : null,
+          // claude/codex (oauth) gate on login; hermes/opencode are managed
           // out-of-band (the user sets up their key on the host), so they are
           // usable whenever installed and never gate on a key Relay can't see.
           usable:
@@ -100,12 +106,23 @@ module.exports = function createMetaRouter(ctx) {
     });
   }
 
+  // The model and effort pages show the installed CLI version, so this ran a
+  // subprocess every time one of them opened. The version only moves when the
+  // binary is replaced, so remember it and re-run at most once a minute; the
+  // updater below overwrites the entry with the version it just installed.
+  const VERSION_TTL_MS = 60_000;
+  const versionCache = new Map();
+
   async function cliVersion(agentKey) {
     const cli = CLI[agentKey];
     if (!cli) return '';
+    const cached = versionCache.get(agentKey);
+    if (cached && Date.now() - cached.at < VERSION_TTL_MS) return cached.version;
     const result = await runCliCommand(cli.bin, cli.versionArgs, 15000);
     // Versions print as e.g. "2.1.161 (Claude Code)" / "codex-cli 0.132.0".
-    return result.ok ? result.text.split('\n')[0].trim() : '';
+    const version = result.ok ? result.text.split('\n')[0].trim() : '';
+    versionCache.set(agentKey, { version, at: Date.now() });
+    return version;
   }
 
   // Catalog of selectable model/effort/permission/fast options for one agent. Model
@@ -181,6 +198,7 @@ module.exports = function createMetaRouter(ctx) {
     const before = await cliVersion(agent.key);
     const result = await runCliCommand(cli.bin, cli.updateArgs, 180000);
     clearModelDiscoveryCache(agent.key);
+    versionCache.delete(agent.key);
     const after = await cliVersion(agent.key);
     return res.json({
       ok: result.ok,
@@ -195,7 +213,7 @@ module.exports = function createMetaRouter(ctx) {
 
   // Best-effort login state per agent so the app can warn before sending a
   // message. loggedIn is true/false when detectable from on-disk credentials,
-  // or null when it cannot be determined without running the CLI (e.g. agy).
+  // or null when it cannot be determined without running the CLI.
   router.get('/api/auth/status', (_req, res) => {
     res.json({
       agents: listAgents().map((agent) => ({

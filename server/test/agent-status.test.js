@@ -45,6 +45,14 @@ after(() => {
   }
 });
 
+// A JWT with only the `exp` claim, which is all the status reader decodes.
+function jwt(expSeconds) {
+  const payload = Buffer.from(JSON.stringify({ exp: expSeconds })).toString(
+    'base64url',
+  );
+  return `header.${payload}.signature`;
+}
+
 test('detects installed CLI agents and credential files without exposing values', () => {
   const home = makeHome();
   writeJson(path.join(home, '.claude', '.credentials.json'), {
@@ -56,15 +64,6 @@ test('detects installed CLI agents and credential files without exposing values'
   writeJson(path.join(home, '.codex', 'auth.json'), {
     tokens: { access_token: 'codex-token' },
   });
-  writeText(
-    path.join(
-      home,
-      '.gemini',
-      'antigravity-cli',
-      'antigravity-oauth-token',
-    ),
-    'agy-token\n',
-  );
   writeJson(path.join(home, '.hermes', 'auth.json'), {
     provider: 'openai',
     apiKey: 'hermes-key',
@@ -72,34 +71,73 @@ test('detects installed CLI agents and credential files without exposing values'
 
   const result = statuses(
     home,
-    new Set(['claude', 'codex', 'agy', 'opencode', 'hermes']),
+    new Set(['claude', 'codex', 'opencode', 'hermes']),
   );
 
   assert.deepEqual(result.claude, {
     installed: true,
     authed: true,
     authKind: 'oauth',
+    credentialExpiresAt: null,
   });
   assert.deepEqual(result.codex, {
     installed: true,
     authed: true,
     authKind: 'oauth',
-  });
-  assert.deepEqual(result.agy, {
-    installed: true,
-    authed: true,
-    authKind: 'oauth',
+    credentialExpiresAt: null,
   });
   assert.deepEqual(result.hermes, {
     installed: true,
     authed: true,
     authKind: 'apiKey',
+    credentialExpiresAt: null,
   });
   assert.deepEqual(result.opencode, {
     installed: true,
     authed: true,
     authKind: 'apiKeyOptional',
+    credentialExpiresAt: null,
   });
+});
+
+test('reports the OAuth credential expiry for claude and codex', () => {
+  const home = makeHome();
+  writeJson(path.join(home, '.claude', '.credentials.json'), {
+    claudeAiOauth: {
+      accessToken: 'access-value',
+      refreshToken: 'refresh-value',
+      expiresAt: 1893456000000,
+    },
+  });
+  writeJson(path.join(home, '.codex', 'auth.json'), {
+    tokens: { access_token: 'codex-token', id_token: jwt(1893456789) },
+  });
+
+  const result = statuses(home, new Set(['claude', 'codex']));
+
+  assert.equal(result.claude.credentialExpiresAt, 1893456000000);
+  assert.equal(result.codex.credentialExpiresAt, 1893456789000);
+});
+
+test('reports a null expiry when the credential carries no usable timestamp', () => {
+  const home = makeHome();
+  writeJson(path.join(home, '.claude', '.credentials.json'), {
+    claudeAiOauth: {
+      accessToken: 'access-value',
+      refreshToken: 'refresh-value',
+      expiresAt: 'not-a-number',
+    },
+  });
+  writeJson(path.join(home, '.codex', 'auth.json'), {
+    tokens: { access_token: 'codex-token', id_token: 'not-a-jwt' },
+  });
+
+  const result = statuses(home, new Set(['claude', 'codex']));
+
+  assert.equal(result.claude.authed, true);
+  assert.equal(result.claude.credentialExpiresAt, null);
+  assert.equal(result.codex.authed, true);
+  assert.equal(result.codex.credentialExpiresAt, null);
 });
 
 test('requires the expected credential shape for each agent', () => {
@@ -110,27 +148,17 @@ test('requires the expected credential shape for each agent', () => {
   writeJson(path.join(home, '.codex', 'auth.json'), {
     tokens: {},
   });
-  writeText(
-    path.join(
-      home,
-      '.gemini',
-      'antigravity-cli',
-      'antigravity-oauth-token',
-    ),
-    '   ',
-  );
   writeJson(path.join(home, '.hermes', 'auth.json'), {
     provider: 'openai',
   });
 
   const result = statuses(
     home,
-    new Set(['claude', 'codex', 'agy', 'opencode', 'hermes']),
+    new Set(['claude', 'codex', 'opencode', 'hermes']),
   );
 
   assert.equal(result.claude.authed, false);
   assert.equal(result.codex.authed, false);
-  assert.equal(result.agy.authed, false);
   assert.equal(result.hermes.authed, false);
   assert.equal(result.opencode.authed, true);
 });

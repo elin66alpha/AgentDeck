@@ -9,7 +9,7 @@ module.exports = function createSessionsRouter(ctx) {
     agentPayload,
     agentRequiredOrUnknownError,
     clearHistory,
-    clearSession,
+    purgeSession,
     createChatSession,
     deleteChatSession,
     listChatSessions,
@@ -89,7 +89,7 @@ module.exports = function createSessionsRouter(ctx) {
     });
   });
 
-  router.post('/api/sessions/delete', (req, res) => {
+  router.post('/api/sessions/delete', async (req, res) => {
     const agentKey = String(req.body.agent || '').trim();
     const sessionId = String(req.body.sessionId || '').trim();
     const scope = resolveAgentScope(req, res, {
@@ -127,7 +127,7 @@ module.exports = function createSessionsRouter(ctx) {
       });
     }
     const result = deleteChatSession(contextKey, sessionId);
-    clearSession(scopeKey);
+    await purgeSession(scopeKey, { agentKey: agent.key, workdir });
     clearHistory(scopeKey);
     return res.json({
       ok: true,

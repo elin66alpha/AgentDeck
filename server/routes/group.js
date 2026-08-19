@@ -18,14 +18,25 @@ const {
 const { normalizeSettings } = require('../lib/agent-options');
 
 // Multi-agent group chat: one human, several agents, one canonical transcript.
-// The orchestrator reuses the single-agent turn pipeline (runAgentTurn) once per
-// summoned member, serialized on the group's scope so exactly one agent holds the
-// floor at a time. Each member runs against its OWN resumable CLI session (its
-// private memory) and is fed only the delta since it last spoke (see
-// docs/group-chat.md, "plan B"). The group transcript lives under a dedicated
-// scope agent key so it never mixes with any member's solo conversation.
+// The orchestrator reuses the single-agent turn pipeline (runAgentTurn) once for
+// every summoned member. Members in one wave run concurrently from the same
+// transcript snapshot, each against its OWN resumable CLI session and unseen
+// transcript delta (see docs/handbook.md, "Swarms"). The canonical transcript
+// uses a dedicated scope agent key so it never mixes with solo conversations.
 const GROUP_SCOPE_PREFIX = 'group:';
 const HUMAN_AUTHOR = 'human';
+
+// A member's reply can summon other members, so one human message can run
+// several waves of turns. Cap how many of those agent-driven waves follow the
+// human's, since two members that keep naming each other would otherwise talk
+// (and bill) forever. 0 restores human-only summoning.
+const DEFAULT_MAX_MENTION_HOPS = 3;
+
+function maxMentionHops(env = process.env) {
+  const raw = Number.parseInt(env.RELAY_SWARM_MAX_HOPS ?? '', 10);
+  if (!Number.isFinite(raw) || raw < 0) return DEFAULT_MAX_MENTION_HOPS;
+  return Math.min(raw, 20);
+}
 
 function wantsStream(req) {
   return String(req.get('accept') || '')
@@ -96,7 +107,7 @@ module.exports = function createGroupRouter(ctx) {
     activeRequests,
     agentTurnDependencies,
     clearHistory,
-    clearSession,
+    purgeSession,
     finalizeStaleStreamingHistory,
     getAgent,
     normalizeDeviceId,
@@ -115,6 +126,7 @@ module.exports = function createGroupRouter(ctx) {
     validateWorkdir,
   } = ctx;
   const router = express.Router();
+  const maxHops = maxMentionHops();
 
   const groupScopeKeyFor = (workdir, groupId) =>
     sessionContextKeyFor(`${GROUP_SCOPE_PREFIX}${groupId}`, workdir);
@@ -229,7 +241,7 @@ module.exports = function createGroupRouter(ctx) {
     return res.json({ ok: true, workdir, group, groups: listGroups(workdir) });
   });
 
-  router.post('/api/groups/delete', (req, res) => {
+  router.post('/api/groups/delete', async (req, res) => {
     const workdir = resolveWorkdir(req, res);
     if (workdir === null) return undefined;
     const groupId = String(req.body.groupId || '').trim();
@@ -245,7 +257,10 @@ module.exports = function createGroupRouter(ctx) {
     deleteGroup(workdir, group.id);
     clearHistory(scopeKey);
     for (const memberKey of group.members) {
-      clearSession(memberSessionKeyFor(runWorkdir, group.id, memberKey));
+      await purgeSession(memberSessionKeyFor(runWorkdir, group.id, memberKey), {
+        agentKey: memberKey,
+        workdir: runWorkdir,
+      });
     }
     return res.json({ ok: true, workdir, groups: listGroups(workdir) });
   });
@@ -267,7 +282,7 @@ module.exports = function createGroupRouter(ctx) {
 
   // Reset a swarm's transcript and every member's forked CLI session, keeping the
   // swarm itself. The next message starts the conversation afresh.
-  router.post('/api/group/clear', (req, res) => {
+  router.post('/api/group/clear', async (req, res) => {
     const workdir = resolveWorkdir(req, res);
     if (workdir === null) return undefined;
     const groupId = String(req.body.groupId || '').trim();
@@ -282,7 +297,10 @@ module.exports = function createGroupRouter(ctx) {
     }
     clearHistory(scopeKey);
     for (const memberKey of group.members) {
-      clearSession(memberSessionKeyFor(runWorkdir, group.id, memberKey));
+      await purgeSession(memberSessionKeyFor(runWorkdir, group.id, memberKey), {
+        agentKey: memberKey,
+        workdir: runWorkdir,
+      });
     }
     return res.json({ ok: true, workdir, group });
   });
@@ -406,44 +424,87 @@ module.exports = function createGroupRouter(ctx) {
     });
 
     const base = agentTurnDependencies();
-    // Snapshot the transcript once — after the human message, before any member
-    // reply. Every member summoned in THIS message is fed the same delta, so a
-    // batch of @mentions runs in parallel without any member seeing a sibling's
-    // in-flight reply. (A later message still sees the earlier replies, because it
-    // snapshots after they were recorded — cross-round stays collaborative.)
-    const snapshot = readHistory(scopeKey);
     // Mark the group scope busy for the whole round. Members serialize on their
     // own session keys (so they run concurrently), so this group scope key is what
     // the delete/clear/history routes consult to tell the round is still running.
     runningScopes.add(scopeKey);
 
-    // Freeze every summoned member's prompt up front, from the one snapshot, so a
-    // member's prompt can never absorb a sibling's reply even as those replies
-    // stream into the shared transcript once the turns start running.
-    const plans = mentions
-      .map((memberKey, index) => {
-        const memberAgent = getAgent(memberKey);
-        if (!memberAgent) return null;
-        const memberSessionKey = memberSessionKeyFor(runWorkdir, group.id, memberKey);
-        // Plan B: feed this member only what happened since it last spoke, each
-        // line labeled with its speaker. Its own resumable session has the rest.
-        const delta = deltaSince(snapshot, memberKey);
-        const memberConfig = group.memberConfigs[memberKey] || {};
-        const groupPrompt = buildGroupPrompt({
-          selfLabel: groupLabelFor(memberKey),
-          persona: memberConfig.prompt,
-          delta,
-          labelFor: groupLabelFor,
-          maxBytes: Math.max(1024, MAX_PROMPT_BYTES - 1024),
-        });
-        return { memberKey, memberAgent, memberSessionKey, groupPrompt, index };
-      })
-      .filter(Boolean);
+    // Everyone this member is allowed to hand the floor to. Empty when
+    // agent-to-agent summoning is off, so the prompt never offers what the
+    // orchestrator would then ignore.
+    const rosterFor = (memberKey) =>
+      maxHops === 0
+        ? []
+        : group.members
+            .filter((key) => key !== memberKey)
+            .map((key) => ({ key, label: groupLabelFor(key) }));
+
+    // Freeze every summoned member's prompt up front, from one snapshot taken at
+    // the start of the wave, so a member's prompt can never absorb a sibling's
+    // reply even as those replies stream into the shared transcript once the
+    // turns start running. (The next wave snapshots again, so it does see them.)
+    const planWave = (summons, wave) => {
+      const snapshot = readHistory(scopeKey);
+      return summons
+        .map(({ memberKey, summonedBy }, index) => {
+          const memberAgent = getAgent(memberKey);
+          if (!memberAgent) return null;
+          const memberSessionKey = memberSessionKeyFor(runWorkdir, group.id, memberKey);
+          // Plan B: feed this member only what happened since it last spoke, each
+          // line labeled with its speaker. Its own resumable session has the rest.
+          const delta = deltaSince(snapshot, memberKey);
+          const memberConfig = group.memberConfigs[memberKey] || {};
+          const groupPrompt = buildGroupPrompt({
+            selfLabel: groupLabelFor(memberKey),
+            persona: memberConfig.prompt,
+            delta,
+            labelFor: groupLabelFor,
+            roster: rosterFor(memberKey),
+            maxBytes: Math.max(1024, MAX_PROMPT_BYTES - 1024),
+          });
+          return {
+            memberKey,
+            memberAgent,
+            memberSessionKey,
+            groupPrompt,
+            summonedBy,
+            turnRequestId: `${requestId}.${wave}.${index}.${memberKey}`,
+          };
+        })
+        .filter(Boolean);
+    };
+
+    // Who the replies of a finished wave handed the floor to. A member never
+    // summons itself (that would never terminate), and is summoned once per wave
+    // however many siblings named it — it sees all of them in its next delta.
+    // Failed and cancelled turns are skipped: their recorded content is an error
+    // message, not something an agent chose to say.
+    const nextSummons = (results) => {
+      const seen = new Set();
+      const out = [];
+      for (const result of results) {
+        if (!result || result.status !== 'done') continue;
+        const summoned = parseMentions(result.content, group.members, groupLabelFor);
+        for (const memberKey of summoned) {
+          if (memberKey === result.agent || seen.has(memberKey)) continue;
+          seen.add(memberKey);
+          out.push({ memberKey, summonedBy: result.agent });
+        }
+      }
+      return out;
+    };
 
     // One summoned member's turn. The assistant placeholder is recorded
     // synchronously (before the first await), so kicking these off in mention
     // order keeps the transcript ordered even though replies arrive in parallel.
-    const runMember = async ({ memberKey, memberAgent, memberSessionKey, groupPrompt, index }) => {
+    const runMember = async ({
+      memberKey,
+      memberAgent,
+      memberSessionKey,
+      groupPrompt,
+      summonedBy,
+      turnRequestId,
+    }) => {
       const dependencies = {
         ...base,
         // Tag every shared-stream event with the group so only clients viewing
@@ -474,7 +535,7 @@ module.exports = function createGroupRouter(ctx) {
           // Record the swarm-scoped display name so the transcript attributes the
           // reply to the member's nickname (falls back to the agent label).
           agentLabel: groupLabelFor(memberKey),
-          summonedBy: HUMAN_AUTHOR,
+          summonedBy,
           groupId: group.id,
           groupName: group.name,
         },
@@ -482,7 +543,7 @@ module.exports = function createGroupRouter(ctx) {
         prompt: groupPrompt,
         recordHistory: true,
         recordUserMessage: false,
-        requestId: `${requestId}.${index}.${memberKey}`,
+        requestId: turnRequestId,
         responder,
         runState,
         scopeKey,
@@ -490,15 +551,31 @@ module.exports = function createGroupRouter(ctx) {
         signal: abortController.signal,
         workdir: runWorkdir,
       });
-      return { agent: memberKey, status: result && result.status };
+      return {
+        agent: memberKey,
+        status: result && result.status,
+        summonedBy,
+        content: (result && result.content) || '',
+      };
     };
 
-    let turns = [];
+    const turns = [];
     try {
-      const settled = runState.cancelled
-        ? []
-        : await Promise.all(plans.map((plan) => runMember(plan)));
-      turns = settled.filter(Boolean);
+      // The human's mentions open the round; each wave's replies can summon the
+      // next, up to maxHops waves after the human's.
+      let summons = mentions.map((memberKey) => ({
+        memberKey,
+        summonedBy: HUMAN_AUTHOR,
+      }));
+      for (let wave = 0; summons.length > 0 && !runState.cancelled; wave += 1) {
+        const settled = await Promise.all(
+          planWave(summons, wave).map((plan) => runMember(plan)),
+        );
+        for (const result of settled) {
+          if (result) turns.push({ agent: result.agent, status: result.status });
+        }
+        summons = wave >= maxHops ? [] : nextSummons(settled);
+      }
     } finally {
       runningScopes.delete(scopeKey);
       activeRequests.delete(requestId);

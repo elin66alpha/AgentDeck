@@ -46,6 +46,14 @@ app.*.map.json
 /android/app/release
 /android/app/google-services.json
 
+# Release artifacts built by scripts/build_flow.sh or prepared for a tag.
+# They are published as release assets, never committed.
+*.apk
+*.aab
+*.tar.gz
+*.zip
+/SHA256SUMS
+
 # Relay backend local state and secrets
 /server/.env
 /server/tokens.json

@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:relay/core/backend/backend_client.dart';
 import 'package:relay/core/i18n/app_strings.dart';
+import 'package:relay/core/models/cli_agent.dart';
 import 'package:relay/core/models/machine_credential.dart';
 import 'package:relay/core/settings/app_settings_controller.dart';
 import 'package:relay/core/storage/machine_credentials_store.dart';
+import 'package:relay/features/cli_agents/cli_agents_controller.dart';
 import 'package:relay/features/machines/machine_credentials_controller.dart';
 import 'package:relay/features/machines/machine_credentials_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -106,6 +108,69 @@ void main() {
     final Terminal secondTerminal =
         tester.widget<TerminalView>(find.byType(TerminalView)).terminal;
     expect(identical(firstTerminal, secondTerminal), isTrue);
+  });
+  testWidgets('agent credentials report expiry instead of a login action', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    MachineCredentialsStore.resetCacheForTest();
+    tester.view.physicalSize = const Size(1200, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    const MachineCredential credential = MachineCredential(
+      id: 'machine-1',
+      name: 'Test machine',
+      baseUrl: 'https://relay.example.com',
+      token: 'device-token',
+      createdAt: '2026-07-13T00:00:00.000Z',
+    );
+    final MachineCredentialsController machinesController =
+        MachineCredentialsController(
+      store: _MemoryMachineCredentialsStore(credential),
+    );
+    await machinesController.load();
+
+    final DateTime now = DateTime.now();
+    final CliAgentsController agentsController = CliAgentsController()
+      ..syncAgents(<CliAgent>[
+        CliAgent(
+          key: 'claude',
+          label: 'Claude Code',
+          description: 'Anthropic Claude Code CLI',
+          authKind: 'oauth',
+          credentialExpiresAt: now.add(const Duration(days: 12, hours: 1)),
+        ),
+        CliAgent(
+          key: 'codex',
+          label: 'Codex',
+          description: 'OpenAI Codex CLI',
+          authKind: 'oauth',
+          credentialExpiresAt: now.subtract(const Duration(days: 2, hours: 1)),
+        ),
+      ]);
+
+    await tester.pumpWidget(
+      AppScope(
+        controller: AppSettingsController(),
+        child: MaterialApp(
+          home: MachineCredentialsScreen(
+            machinesController: machinesController,
+            agentsController: agentsController,
+            backendClient: _FailingTerminalBackendClient(),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Log in again in 12 days'), findsOneWidget);
+    expect(
+      find.text('Expired 2 days ago. Log in again on the backend host.'),
+      findsOneWidget,
+    );
+    expect(find.widgetWithText(FilledButton, 'Log in'), findsNothing);
+    expect(find.widgetWithText(FilledButton, 'Log in again'), findsNothing);
   });
 }
 

@@ -2,10 +2,10 @@
 
 // Swarm (group chat) state: a swarm is a named, ordered set of agent members
 // that share one canonical transcript. It sits above the per-agent scopes (see
-// docs/group-chat.md). Each member keeps its own resumable CLI session; the
-// swarm additionally pins its own work tree (`workdir`) and per-member
-// model/effort/permission/fast (`memberConfigs`) so it is configured independently of
-// each member's solo chat.
+// docs/handbook.md, "Swarms"). Each member keeps its own resumable CLI session;
+// the swarm additionally pins its own work tree (`workdir`) and per-member
+// model/effort/permission/fast (`memberConfigs`) independently of each member's
+// solo chat.
 //
 // Persisted with the shared json-store (in-memory cache + atomic 0o600 writes),
 // consistent with the other backend state files. The on-disk shape is:
@@ -41,7 +41,7 @@ function normalizeName(value, fallback) {
   return (text || fallback).slice(0, 80);
 }
 
-// Members are agent keys (claude, codex, agy, ...). Dedupe, keep order, cap the
+// Members are agent keys (claude, codex, opencode, ...). Dedupe, keep order, cap the
 // count, and reject anything that isn't a plausible agent key so a member can
 // never inject a separator into a derived scope key.
 function normalizeMembers(members) {

@@ -8,10 +8,11 @@ Relay 在所有后端操作系统上使用同一个 Node.js 服务和同一套 H
 ## 前置要求
 
 - Node.js 18 或更新版本。
-- 后端至少安装一个支持的 CLI：Claude Code、Codex、Antigravity（`agy`）、
-  OpenCode 或 Hermes。
-- CLI 需要在后端主机上完成认证。当主机提供兼容的 `script` PTY 工具时，Relay 可以
-  为 Claude、Codex 和 Agy 中转 OAuth 登录；OpenCode 和 Hermes 的密钥仍在主机管理。
+- 后端至少安装一个支持的 CLI：Claude Code、Codex、OpenCode 或 Hermes。
+- 每个 CLI 都必须直接在后端主机上完成认证或 provider 配置。Relay 只报告状态，
+  不执行 OAuth 登录，也不收集 provider 密钥。
+- Unix 主机下载文件夹时需要 `zip`。Linux 安装还需要 PM2、Python 3、`make` 和
+  C++ 编译器，以编译终端的 PTY 依赖。
 - 只有正式 Cloudflare Tunnel 或 Quick Tunnel 模式需要 `cloudflared`。
 
 ## 安装
@@ -34,11 +35,21 @@ Relay 在所有后端操作系统上使用同一个 Node.js 服务和同一套 H
 2. **正式 Cloudflare Tunnel：** 使用 Cloudflare zone 下的稳定域名，服务保持绑定
    `127.0.0.1`。
 3. **Cloudflare Quick Tunnel：** 适合试用。重启后 `trycloudflare.com` 地址可能变化，
-   地址变化时需要重新生成并导入凭证。
+   地址变化时需要重新生成并导入凭证。先从服务日志找到新地址，再在仓库根目录运行
+   `npm --prefix server run credential -- --url https://新地址`。
 
 ## 服务管理
 
 ### Linux
+
+```bash
+./backends/linux/status.sh
+./backends/linux/start.sh
+./backends/linux/stop.sh
+./backends/linux/uninstall.sh
+```
+
+这些脚本封装 PM2，也可以继续直接使用 PM2 命令：
 
 ```bash
 pm2 list
@@ -48,8 +59,11 @@ pm2 logs relay-tunnel
 ```
 
 Linux 安装需要 PM2（`npm install -g pm2`）。进程名为 `relay-server`；隧道模式还会创建
-`relay-tunnel`。交互终端的 PTY 依赖会在 Linux 上本地编译，因此首次安装还需要 Python 3、
-`make` 和 C++ 编译器（Debian/Ubuntu 可安装 `build-essential`）。
+`relay-tunnel`。日志位于 `~/.pm2/logs/`，文件名为 `relay-server-*.log` 和
+`relay-tunnel-*.log`。`uninstall.sh` 只删除 PM2 进程，保留后端数据、令牌和凭证。
+交互终端的 PTY 依赖会在 Linux 上本地编译，因此首次安装还需要 Python 3、
+`make` 和 C++ 编译器（Debian/Ubuntu 可安装 `build-essential`）。如果客户端需要下载
+文件夹，还要安装 `zip`。
 
 ### macOS
 
@@ -79,6 +93,9 @@ LaunchAgent 位于 `~/Library/LaunchAgents`。日志在 `~/Library/Logs/Relay/` 
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ```
 
+三个平台的卸载脚本都只移除受管理的服务，配置、token、凭证、历史和日志会保留，需按需
+手动清理。
+
 ## 手动启动
 
 开发或排障时可以绕过平台服务脚本：
@@ -90,4 +107,5 @@ cp .env.example .env
 npm start
 ```
 
-再用 `npm run credential` 单独生成凭证。配置项见 `server/.env.example`，生产加固见技术手册。
+在这台主机上完成所选 agent CLI 的认证，再用 `npm run credential` 单独生成凭证。
+配置项见 `server/.env.example`，生产加固见技术手册。

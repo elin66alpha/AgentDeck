@@ -15,6 +15,26 @@ String agentUnavailableMessage(AppStrings strings, CliAgent agent) {
   }
 }
 
+/// How long the agent's stored credential still has on the backend host, or
+/// null when it reports no expiry. Relay cannot log the CLI in remotely, so the
+/// message says when a login on that host is due rather than offering an action.
+String? agentCredentialExpiryMessage(
+  AppStrings strings,
+  CliAgent agent, {
+  DateTime? now,
+}) {
+  final CredentialExpiry? expiry = cliAgentCredentialExpiry(agent, now: now);
+  if (expiry == null) return null;
+  if (expiry.expired) {
+    return expiry.days > 0
+        ? strings.credentialExpiredDays(expiry.days)
+        : strings.credentialExpiredToday;
+  }
+  return expiry.days > 0
+      ? strings.credentialExpiresInDays(expiry.days)
+      : strings.credentialExpiresToday;
+}
+
 void showAgentUnavailableSnack(BuildContext context, CliAgent agent) {
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(content: Text(agentUnavailableMessage(context.l10n, agent))),
@@ -34,7 +54,7 @@ class AgentStatusLights extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final AppStrings strings = context.l10n;
-    // Only OAuth agents (claude/codex/agy) show the second "logged in" light.
+    // Only OAuth agents (claude/codex) show the second "logged in" light.
     // hermes/opencode manage their key on the host out of Relay's view, so they
     // get just the install light and count as usable once installed.
     final bool showAuthLight = agent.authKind == 'oauth';

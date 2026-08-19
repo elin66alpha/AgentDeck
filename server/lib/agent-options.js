@@ -1,12 +1,12 @@
 'use strict';
 
 // Single source of truth for the per-agent Model / Effort / Permission controls
-// exposed in the chat composer's "+" drawer. Each selectable option carries the
-// exact CLI argv tokens it maps to, so agents.js can splice them into a spawn
-// without knowing agent-specific flag shapes.
+// exposed in the chat composer's "+" drawer. The tables feed normalized settings
+// into the Claude SDK, ACP, Codex app-server, and legacy argv helpers without
+// making the runners duplicate validation.
 //
 // Capability-aware: each agent only exposes the controls supported by its CLI.
-// Antigravity (`agy`) supports --model and permission flags, but no effort flag.
+// Hermes, for example, has no per-invocation model or effort flag.
 //
 // Every group is an explicit, named choice — there is no opaque "default" entry,
 // so the user always knows exactly which model, reasoning effort, and permission
@@ -16,7 +16,6 @@ const fs = require('fs');
 const path = require('path');
 
 const { discoverModels } = require('./model-discovery');
-const { configuredAgyModel } = require('./agy-paths');
 
 // Static fallback model catalog. The live list normally comes from
 // model-discovery (which reads what the installed CLI actually ships, newest
@@ -63,48 +62,6 @@ const BASE_MODELS = {
       args: ['-m', 'gpt-5.4-mini'],
     },
   ],
-  agy: [
-    {
-      id: 'gemini-3-5-flash-medium',
-      label: 'Gemini 3.5 Flash (Medium)',
-      args: ['--model', 'Gemini 3.5 Flash (Medium)'],
-    },
-    {
-      id: 'gemini-3-5-flash-high',
-      label: 'Gemini 3.5 Flash (High)',
-      args: ['--model', 'Gemini 3.5 Flash (High)'],
-    },
-    {
-      id: 'gemini-3-5-flash-low',
-      label: 'Gemini 3.5 Flash (Low)',
-      args: ['--model', 'Gemini 3.5 Flash (Low)'],
-    },
-    {
-      id: 'gemini-3-1-pro-low',
-      label: 'Gemini 3.1 Pro (Low)',
-      args: ['--model', 'Gemini 3.1 Pro (Low)'],
-    },
-    {
-      id: 'gemini-3-1-pro-high',
-      label: 'Gemini 3.1 Pro (High)',
-      args: ['--model', 'Gemini 3.1 Pro (High)'],
-    },
-    {
-      id: 'claude-sonnet-4-6-thinking',
-      label: 'Claude Sonnet 4.6 (Thinking)',
-      args: ['--model', 'Claude Sonnet 4.6 (Thinking)'],
-    },
-    {
-      id: 'claude-opus-4-6-thinking',
-      label: 'Claude Opus 4.6 (Thinking)',
-      args: ['--model', 'Claude Opus 4.6 (Thinking)'],
-    },
-    {
-      id: 'gpt-oss-120b-medium',
-      label: 'GPT-OSS 120B (Medium)',
-      args: ['--model', 'GPT-OSS 120B (Medium)'],
-    },
-  ],
   // opencode models are `provider/model`; these free entries work without
   // credentials. Live discovery isn't wired for opencode, so this static list
   // (plus models-extra.json) is the catalog. Run `opencode models` for the full
@@ -139,7 +96,6 @@ const EFFORTS = {
     { id: 'high', label: 'High', args: ['-c', 'model_reasoning_effort=high'] },
     { id: 'xhigh', label: 'Extra high', args: ['-c', 'model_reasoning_effort=xhigh'] },
   ],
-  agy: [],
   // opencode exposes reasoning effort via `--variant`, but valid variants are
   // model-specific (an unsupported one errors), so it stays opt-in with no
   // default — selecting one adds `--variant <id>`.
@@ -168,10 +124,9 @@ const FAST_MODES = {
 };
 
 // Permission tiers. The bypass tier is listed first but is no longer the
-// default — AGENT_DEFAULTS below picks a safer "auto" tier per agent. For
-// Codex, non-bypass tiers must pin approval_policy=never — `codex exec` is
-// non-interactive, so any approval prompt would hang forever instead of being
-// answered.
+// default — AGENT_DEFAULTS below picks a safer "auto" tier per agent. Codex
+// keeps approvals off on every tier, so the sandbox is the whole boundary:
+// Relay has no approval UI, so a prompt has no one to answer it.
 const PERMISSIONS = {
   claude: [
     {
@@ -200,10 +155,8 @@ const PERMISSIONS = {
       description: 'No sandbox, no approvals.',
       args: ['--dangerously-bypass-approvals-and-sandbox'],
     },
-    // Use the `-c sandbox_mode=` config override rather than `-s`: `codex exec
-    // resume` accepts `-c` but not `-s`, so the config form works for both new
-    // and resumed turns. approval_policy=never is mandatory — exec is
-    // non-interactive, so any approval prompt would hang.
+    // The args below are the equivalent CLI flags, kept so this stays one
+    // source of truth; codexSessionOptions is what the runner actually uses.
     {
       id: 'workspace-write',
       label: 'Workspace write',
@@ -223,22 +176,12 @@ const PERMISSIONS = {
       args: ['-c', 'sandbox_mode=danger-full-access', '-c', 'approval_policy=never'],
     },
   ],
-  agy: [
-    {
-      id: 'bypass',
-      label: 'Bypass (full auto)',
-      description: 'Auto-approve all tool requests.',
-      args: ['--dangerously-skip-permissions'],
-    },
-    {
-      id: 'sandbox',
-      label: 'Sandbox',
-      description: 'Run with terminal restrictions enabled.',
-      args: ['--sandbox'],
-    },
-  ],
-  // opencode `run` is non-interactive, so the default tier auto-approves (a
-  // prompt would hang). "Ask" leaves approvals to opencode (may block edits).
+  // opencode and hermes run over ACP, where approval requests come to Relay
+  // itself. Until there is an approval UI the default tier approves them all,
+  // and the cautious tier refuses — which is at least deterministic, where a
+  // non-interactive CLI run could stall. The args are the equivalent CLI flags,
+  // kept so the tables stay one source of truth; acpSessionOptions is what the
+  // runners actually use.
   opencode: [
     {
       id: 'bypass',
@@ -249,12 +192,10 @@ const PERMISSIONS = {
     {
       id: 'ask',
       label: 'Ask',
-      description: 'Let opencode decide; some actions may be blocked.',
+      description: 'Refuse anything that needs approval; edits may be blocked.',
       args: [],
     },
   ],
-  // Hermes' chat -q is non-interactive; --yolo bypasses approval prompts so the
-  // run can't hang. "Cautious" omits it (Hermes may block dangerous commands).
   hermes: [
     {
       id: 'yolo',
@@ -265,17 +206,16 @@ const PERMISSIONS = {
     {
       id: 'cautious',
       label: 'Cautious',
-      description: 'Keep approvals; dangerous commands may be blocked.',
+      description: 'Refuse anything that needs approval; edits are blocked.',
       args: [],
     },
   ],
 };
 
-// claude/codex/agy CLI invocation + how to query/update each binary.
+// CLI invocation + how to query/update each binary.
 const CLI = {
   claude: { bin: 'claude', versionArgs: ['--version'], updateArgs: ['update'] },
   codex: { bin: 'codex', versionArgs: ['--version'], updateArgs: ['update'] },
-  agy: { bin: 'agy', versionArgs: ['--version'], updateArgs: ['update'] },
   // TODO(opencode/hermes): confirm version/update subcommands once installed.
   opencode: { bin: 'opencode', versionArgs: ['--version'], updateArgs: ['upgrade'] },
   hermes: { bin: 'hermes', versionArgs: ['--version'], updateArgs: ['update'] },
@@ -286,12 +226,11 @@ const CLI = {
 // is always knowable. The model default is derived from the live catalog (newest
 // first) rather than pinned here, so it tracks the installed CLI. Permission
 // starts on a safer "auto" tier instead of full bypass: claude auto-accepts
-// edits, codex writes within the workspace (approvals disabled so exec never
-// hangs), and agy runs sandboxed.
+// edits and codex writes within the workspace (approvals disabled so exec never
+// hangs).
 const AGENT_DEFAULTS = {
   claude: { effort: 'high', permission: 'acceptEdits', fast: 'off' },
   codex: { effort: 'medium', permission: 'workspace-write', fast: 'off' },
-  agy: { permission: 'sandbox' },
   // Non-interactive defaults that can actually do work; effort stays unset
   // (model-specific) and opencode's model default comes from the catalog.
   opencode: { permission: 'bypass' },
@@ -300,22 +239,7 @@ const AGENT_DEFAULTS = {
 
 // Agents whose model group gets an automatic default (the newest catalog entry
 // or the CLI's configured default when available).
-const MODEL_DEFAULT_AGENTS = new Set(['claude', 'codex', 'agy', 'opencode']);
-
-function modelDiscoveryDisabled() {
-  return (
-    process.env.RELAY_MODEL_DISCOVERY === '0' ||
-    process.env.RELAY_MODEL_DISCOVERY === 'false'
-  );
-}
-
-function configuredAgyModelId(models) {
-  if (modelDiscoveryDisabled()) return null;
-  const configured = configuredAgyModel();
-  if (!configured) return null;
-  const match = models.find((model) => model.label === configured);
-  return match ? match.id : null;
-}
+const MODEL_DEFAULT_AGENTS = new Set(['claude', 'codex', 'opencode']);
 
 function defaultsFor(agentKey) {
   return defaultsForModels(agentKey, modelsFor(agentKey));
@@ -323,17 +247,38 @@ function defaultsFor(agentKey) {
 
 const EXTRA_MODELS_FILE = path.join(__dirname, '..', 'models-extra.json');
 
+// Parsed models-extra.json, re-read only when the file's mtime/size changes.
+// modelsFor runs on every turn and every option-picker open, so the common case
+// (no such file) must not cost a failing read each time.
+let extraModelsCache = { stamp: null, value: null };
+
+function readExtraModels() {
+  let stamp = '';
+  try {
+    const stat = fs.statSync(EXTRA_MODELS_FILE);
+    stamp = `${stat.size}:${stat.mtimeMs}`;
+  } catch (_err) {
+    stamp = '';
+  }
+  if (extraModelsCache.stamp === stamp) return extraModelsCache.value;
+  let value = null;
+  if (stamp) {
+    try {
+      value = JSON.parse(fs.readFileSync(EXTRA_MODELS_FILE, 'utf-8'));
+    } catch (_err) {
+      value = null;
+    }
+  }
+  extraModelsCache = { stamp, value };
+  return value;
+}
+
 // Merge user-supplied pinned models from models-extra.json on top of the base
 // catalog. Entries are appended (deduped by id); a brand-new model becomes
 // selectable by editing that file alone, no redeploy. Malformed files are
 // ignored so a typo never breaks the options endpoint.
 function mergeExtraModels(agentKey, base) {
-  let extra;
-  try {
-    extra = JSON.parse(fs.readFileSync(EXTRA_MODELS_FILE, 'utf-8'));
-  } catch (_err) {
-    return base;
-  }
+  const extra = readExtraModels();
   const list = extra && Array.isArray(extra[agentKey]) ? extra[agentKey] : null;
   if (!list) return base;
   const seen = new Set(base.map((m) => m.id));
@@ -435,11 +380,7 @@ function defaultsForModels(agentKey, models) {
   const defaults = { ...(AGENT_DEFAULTS[agentKey] || {}) };
   let defaultModel = null;
   if (MODEL_DEFAULT_AGENTS.has(agentKey) && models.length) {
-    const modelId =
-      agentKey === 'agy'
-        ? configuredAgyModelId(models) || models[0].id
-        : models[0].id;
-    defaultModel = models.find((model) => model.id === modelId) || models[0];
+    [defaultModel] = models;
     defaults.model = defaultModel.id;
   }
   const efforts = effortOptionsFor(agentKey, defaultModel);
@@ -554,10 +495,97 @@ function buildArgs(agentKey, settings) {
   return args;
 }
 
+// Claude runs as a persistent Agent SDK session rather than a per-turn argv
+// invocation, so its settings are resolved into SDK options instead of flags.
+// The resolution itself is normalizeSettings', so the option tables above stay
+// the single source of truth for both shapes.
+const CLAUDE_PERMISSION_MODES = {
+  bypass: 'bypassPermissions',
+  acceptEdits: 'acceptEdits',
+  plan: 'plan',
+};
+
+function claudeSdkOptions(settings) {
+  const chosen = normalizeSettings('claude', settings);
+  const options = {};
+  if (chosen.model) options.model = chosen.model;
+  if (chosen.effort) options.effort = chosen.effort;
+  const permissionMode = CLAUDE_PERMISSION_MODES[chosen.permission];
+  if (permissionMode) {
+    options.permissionMode = permissionMode;
+    // The SDK requires this acknowledgement alongside full bypass; it is the
+    // same gate the CLI's --dangerously-skip-permissions carries.
+    if (permissionMode === 'bypassPermissions') {
+      options.allowDangerouslySkipPermissions = true;
+    }
+  }
+  options.settings = { fastMode: chosen.fast === 'on' };
+  return options;
+}
+
+// ACP agents (opencode, hermes) hold a persistent session too, but their
+// settings are applied over the protocol rather than as argv: the model with
+// session/set_model, the permission tier as a session mode where the agent has
+// one that matches, and in every case by deciding how Relay answers the agent's
+// session/request_permission calls. Resolution stays normalizeSettings' so the
+// option tables above remain the single source of truth.
+//
+// opencode's tiers have no mode to map onto — its `plan` mode disallows edits
+// entirely, which is not what "Ask" means — so it relies on the answers alone.
+const ACP_PERMISSION_MODES = {
+  hermes: { yolo: 'dont_ask', cautious: 'default' },
+};
+
+// The tier that means "approve whatever the agent asks for". Every other tier
+// refuses, because Relay has no approval UI to route the request to.
+const ACP_AUTO_APPROVE = { opencode: 'bypass', hermes: 'yolo' };
+
+function acpSessionOptions(agentKey, settings) {
+  const chosen = normalizeSettings(agentKey, settings);
+  let modelId = chosen.model || null;
+  // Hermes names models `provider:model` over ACP, while its config and
+  // models-extra.json use the CLI's `provider/model` form. Translate so a
+  // pinned id keeps selecting the same model.
+  if (agentKey === 'hermes' && modelId) modelId = modelId.replace('/', ':');
+  const modes = ACP_PERMISSION_MODES[agentKey] || {};
+  return {
+    modelId,
+    modeId: modes[chosen.permission] || null,
+    approve: chosen.permission === ACP_AUTO_APPROVE[agentKey],
+  };
+}
+
+// Codex runs as a persistent app-server thread, so its settings resolve to
+// protocol values instead of `-c` overrides. Every tier keeps approvals off:
+// the sandbox is the boundary, and Relay has no approval UI to answer prompts
+// with — the same reason the argv tiers above pin approval_policy=never.
+const CODEX_SANDBOXES = {
+  bypass: 'danger-full-access',
+  'workspace-write': 'workspace-write',
+  'read-only': 'read-only',
+  'full-access': 'danger-full-access',
+};
+
+function codexSessionOptions(settings) {
+  const chosen = normalizeSettings('codex', settings);
+  return {
+    model: chosen.model || null,
+    effort: chosen.effort || null,
+    sandbox: CODEX_SANDBOXES[chosen.permission] || 'workspace-write',
+    approvalPolicy: 'never',
+    serviceTier: chosen.fast === 'on' ? 'fast' : 'default',
+    // Only reachable if codex asks anyway; the unsandboxed tiers say yes.
+    approve: chosen.permission === 'bypass' || chosen.permission === 'full-access',
+  };
+}
+
 module.exports = {
   defaultsFor,
   CLI,
   describeAgent,
   normalizeSettings,
   buildArgs,
+  claudeSdkOptions,
+  acpSessionOptions,
+  codexSessionOptions,
 };

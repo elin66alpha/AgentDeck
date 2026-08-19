@@ -11,6 +11,8 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../core/backend/backend_client.dart';
 import '../../core/credentials/qr_image_decoder.dart';
+import '../../core/credentials/qr_image_pixels.dart';
+import '../../core/credentials/qr_pixels.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/models/cli_agent.dart';
 import '../../core/models/machine_credential.dart';
@@ -19,7 +21,6 @@ import '../cli_agents/agent_status_lights.dart';
 import '../cli_agents/cli_agents_controller.dart';
 import '../ssh/ssh_terminal_controller.dart';
 import '../ssh/ssh_terminal_screen.dart';
-import 'agent_login_flow_controller.dart';
 import 'deploy_backend_screen.dart';
 import 'machine_credentials_controller.dart';
 
@@ -147,7 +148,6 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
                                 const SizedBox(height: 18),
                                 _AgentCredentialStatusSection(
                                   agentsController: widget.agentsController!,
-                                  onLogin: _startAgentLogin,
                                   onRefresh: _refreshAgents,
                                 ),
                               ],
@@ -206,15 +206,27 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
       if (bytes == null || bytes.isEmpty) {
         throw MachineCredentialException(context.l10n.fileUnreadable);
       }
-      final String raw = await compute<Uint8List, String>(
-        decodeCredentialQrImage,
-        bytes,
-      ).timeout(
+      // Prefer the platform's own decoder (the browser's, on Web) and fall back
+      // to the pure-Dart pipeline on a background isolate. Doing the Dart decode
+      // on Web would block the only thread there is, freezing the tab past the
+      // point where this timeout could still fire.
+      final QrPixels? pixels = await decodeImageToRgba(bytes).timeout(
         const Duration(seconds: 10),
         onTimeout: () => throw MachineCredentialException(
           context.l10n.credentialQrDecodeTimedOut,
         ),
       );
+      final String raw = pixels != null
+          ? decodeQrFromRgba(pixels.width, pixels.height, pixels.rgba)
+          : await compute<Uint8List, String>(
+              decodeCredentialQrImage,
+              bytes,
+            ).timeout(
+              const Duration(seconds: 10),
+              onTimeout: () => throw MachineCredentialException(
+                context.l10n.credentialQrDecodeTimedOut,
+              ),
+            );
       if (raw.trim().isEmpty) {
         throw MachineCredentialException(context.l10n.invalidQr);
       }
@@ -443,19 +455,6 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
     }
   }
 
-  Future<void> _startAgentLogin(CliAgent agent) async {
-    final bool? changed = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext ctx) => _AgentLoginDialog(
-        agent: agent,
-        backendClient: _backendClient,
-      ),
-    );
-    if (changed == true) {
-      await _refreshAgents();
-    }
-  }
-
   Future<void> _confirmDelete(MachineCredential credential) async {
     final bool? ok = await showDialog<bool>(
       context: context,
@@ -518,12 +517,10 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
 class _AgentCredentialStatusSection extends StatelessWidget {
   const _AgentCredentialStatusSection({
     required this.agentsController,
-    required this.onLogin,
     required this.onRefresh,
   });
 
   final CliAgentsController agentsController;
-  final ValueChanged<CliAgent> onLogin;
   final Future<void> Function() onRefresh;
 
   @override
@@ -572,7 +569,6 @@ class _AgentCredentialStatusSection extends StatelessWidget {
                     _AgentCredentialStatusTile(
                       agent: agentsController.agents[index],
                       showDivider: index > 0,
-                      onLogin: onLogin,
                     ),
                 ],
               ),
@@ -588,12 +584,10 @@ class _AgentCredentialStatusTile extends StatelessWidget {
   const _AgentCredentialStatusTile({
     required this.agent,
     required this.showDivider,
-    required this.onLogin,
   });
 
   final CliAgent agent;
   final bool showDivider;
-  final ValueChanged<CliAgent> onLogin;
 
   @override
   Widget build(BuildContext context) {
@@ -601,8 +595,10 @@ class _AgentCredentialStatusTile extends StatelessWidget {
     final AppStrings strings = context.l10n;
     final bool usable = isCliAgentSelectable(agent);
     final Color? textColor = usable ? null : theme.colorScheme.onSurfaceVariant;
+    final CredentialExpiry? expiry = cliAgentCredentialExpiry(agent);
     final String? subtitle = usable
-        ? _readySubtitle(strings, agent)
+        ? (agentCredentialExpiryMessage(strings, agent) ??
+            _readySubtitle(strings, agent))
         : agentUnavailableMessage(strings, agent);
     return Column(
       children: <Widget>[
@@ -614,17 +610,18 @@ class _AgentCredentialStatusTile extends StatelessWidget {
               ? null
               : Text(
                   subtitle,
-                  style: TextStyle(color: theme.colorScheme.outline),
+                  style: TextStyle(
+                    color: expiry?.expired == true
+                        ? theme.colorScheme.error
+                        : theme.colorScheme.outline,
+                  ),
                 ),
           trailing: Wrap(
             spacing: 10,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: <Widget>[
               AgentStatusLights(agent: agent),
-              _AgentCredentialAction(
-                agent: agent,
-                onLogin: onLogin,
-              ),
+              _AgentCredentialAction(agent: agent),
             ],
           ),
         ),
@@ -641,13 +638,9 @@ class _AgentCredentialStatusTile extends StatelessWidget {
 }
 
 class _AgentCredentialAction extends StatelessWidget {
-  const _AgentCredentialAction({
-    required this.agent,
-    required this.onLogin,
-  });
+  const _AgentCredentialAction({required this.agent});
 
   final CliAgent agent;
-  final ValueChanged<CliAgent> onLogin;
 
   @override
   Widget build(BuildContext context) {
@@ -658,14 +651,9 @@ class _AgentCredentialAction extends StatelessWidget {
         child: Text(strings.unavailable),
       );
     }
-    if (agent.authKind == 'oauth') {
-      return FilledButton(
-        onPressed: () => onLogin(agent),
-        child: Text(agent.authed ? strings.loginAgain : strings.login),
-      );
-    }
-    // hermes/opencode get their key set up on the host out of Relay's view, so
-    // there's no in-app key action — just a hint that they're managed there.
+    // Every agent's credential is created on the backend host: claude/codex with
+    // their own `login` command, hermes/opencode with a provider key. Relay only
+    // reports the state it can read there.
     if (agent.key == 'opencode' || agent.key == 'hermes') {
       return OutlinedButton(
         onPressed: null,
@@ -673,204 +661,6 @@ class _AgentCredentialAction extends StatelessWidget {
       );
     }
     return const SizedBox.shrink();
-  }
-}
-
-class _AgentLoginDialog extends StatefulWidget {
-  const _AgentLoginDialog({
-    required this.agent,
-    required this.backendClient,
-  });
-
-  final CliAgent agent;
-  final BackendClient backendClient;
-
-  @override
-  State<_AgentLoginDialog> createState() => _AgentLoginDialogState();
-}
-
-class _AgentLoginDialogState extends State<_AgentLoginDialog> {
-  late final AgentLoginFlowController _flow;
-  final TextEditingController _code = TextEditingController();
-
-  @override
-  void initState() {
-    super.initState();
-    _flow = AgentLoginFlowController(
-      startLogin: widget.backendClient.streamAgentLogin,
-      submitCode: (String sessionId, String code) {
-        return widget.backendClient.submitAgentLoginCode(
-          sessionId: sessionId,
-          code: code,
-        );
-      },
-    )..addListener(_onFlowChanged);
-    _code.addListener(_onFlowChanged);
-    unawaited(_flow.start(widget.agent.key));
-  }
-
-  @override
-  void dispose() {
-    _flow.removeListener(_onFlowChanged);
-    _flow.dispose();
-    _code.removeListener(_onFlowChanged);
-    _code.dispose();
-    super.dispose();
-  }
-
-  void _onFlowChanged() {
-    if (mounted) setState(() {});
-  }
-
-  Future<void> _submit() async {
-    final String code = _code.text.trim();
-    if (code.isEmpty) return;
-    await _flow.submitCode(code);
-  }
-
-  void _close() {
-    Navigator.of(context).pop(_flow.phase == AgentLoginPhase.done);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final AppStrings strings = context.l10n;
-    final ThemeData theme = Theme.of(context);
-    final bool submitting = _flow.phase == AgentLoginPhase.submitting;
-    final bool done = _flow.phase == AgentLoginPhase.done;
-    final bool hasCode = _code.text.trim().isNotEmpty;
-    final bool requiresCode = _flow.requiresCode;
-    return AlertDialog(
-      title: Text(strings.agentLoginTitle(widget.agent.label)),
-      content: SizedBox(
-        width: 520,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              if (_flow.phase == AgentLoginPhase.starting ||
-                  _flow.phase == AgentLoginPhase.waitingForUrl ||
-                  submitting) ...<Widget>[
-                const LinearProgressIndicator(minHeight: 2),
-                const SizedBox(height: 12),
-              ],
-              Text(_statusText(strings)),
-              if (_flow.url != null && _flow.url!.isNotEmpty) ...<Widget>[
-                const SizedBox(height: 12),
-                Text(
-                  requiresCode
-                      ? strings.agentLoginOpenUrl
-                      : strings.agentLoginBrowserOpenUrl,
-                ),
-                const SizedBox(height: 8),
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(10),
-                    child: SelectableText(
-                      _flow.url!,
-                      style: theme.textTheme.bodySmall,
-                    ),
-                  ),
-                ),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton.icon(
-                    onPressed: () async {
-                      await Clipboard.setData(ClipboardData(text: _flow.url!));
-                      if (!context.mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text(strings.copied)),
-                      );
-                    },
-                    icon: const Icon(Icons.copy_rounded),
-                    label: Text(strings.copy),
-                  ),
-                ),
-              ],
-              if (requiresCode) ...<Widget>[
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _code,
-                  enabled: !done && _flow.phase != AgentLoginPhase.error,
-                  decoration: InputDecoration(
-                    labelText: strings.agentLoginCode,
-                    hintText: strings.agentLoginCodeHint,
-                  ),
-                  onSubmitted: (_) => unawaited(_submit()),
-                ),
-              ],
-              if (_flow.output.isNotEmpty) ...<Widget>[
-                const SizedBox(height: 12),
-                Text(
-                  strings.agentLoginOutput,
-                  style: theme.textTheme.labelMedium,
-                ),
-                const SizedBox(height: 6),
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    border: Border.all(color: theme.colorScheme.outlineVariant),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(10),
-                    child: SelectableText(
-                      _flow.output,
-                      style: theme.textTheme.bodySmall,
-                    ),
-                  ),
-                ),
-              ],
-              if (_flow.phase == AgentLoginPhase.error) ...<Widget>[
-                const SizedBox(height: 12),
-                Text(
-                  strings.agentLoginFailed(_flow.error ?? strings.unknown),
-                  style: TextStyle(color: theme.colorScheme.error),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
-      actions: <Widget>[
-        TextButton(
-          onPressed: _close,
-          child: Text(done ? strings.close : strings.cancel),
-        ),
-        if (!done && requiresCode)
-          FilledButton(
-            onPressed: _flow.canSubmitCode && hasCode && !submitting
-                ? () => unawaited(_submit())
-                : null,
-            child: Text(
-              submitting
-                  ? strings.agentLoginSubmitting
-                  : strings.agentLoginSubmit,
-            ),
-          ),
-      ],
-    );
-  }
-
-  String _statusText(AppStrings strings) {
-    return switch (_flow.phase) {
-      AgentLoginPhase.idle ||
-      AgentLoginPhase.starting =>
-        strings.agentLoginStarting,
-      AgentLoginPhase.waitingForUrl => strings.agentLoginWaitingForUrl,
-      AgentLoginPhase.readyForCode => _flow.requiresCode
-          ? strings.agentLoginOpenUrl
-          : strings.agentLoginBrowserOpenUrl,
-      AgentLoginPhase.submitting => strings.agentLoginSubmitting,
-      AgentLoginPhase.done => strings.agentLoginDone,
-      AgentLoginPhase.error => strings.agentLoginFailed(
-          _flow.error ?? strings.unknown,
-        ),
-    };
   }
 }
 

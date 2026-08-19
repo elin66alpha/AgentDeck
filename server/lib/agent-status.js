@@ -12,7 +12,6 @@ const statusCache = new Map();
 const AUTH_KIND = {
   claude: 'oauth',
   codex: 'oauth',
-  agy: 'oauth',
   hermes: 'apiKey',
   opencode: 'apiKeyOptional',
 };
@@ -37,35 +36,46 @@ function fileHasText(fsModule, filePath) {
   }
 }
 
-function claudeAuthed(fsModule, homeDir) {
+// Expiry claim of a JWT, in epoch milliseconds. The payload is decoded, never
+// verified: only `exp` is read and no token value leaves this module.
+function jwtExpiresAt(token) {
+  const payload = String(token || '').split('.')[1];
+  if (!payload) return null;
+  try {
+    const claims = JSON.parse(
+      Buffer.from(payload, 'base64url').toString('utf8'),
+    );
+    return Number.isFinite(claims.exp) ? claims.exp * 1000 : null;
+  } catch (_err) {
+    return null;
+  }
+}
+
+function expiryOrNull(value) {
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function claudeCredential(fsModule, homeDir) {
   const creds = readJson(
     fsModule,
     path.join(homeDir, '.claude', '.credentials.json'),
   );
-  const oauth = creds && creds.claudeAiOauth;
-  return !!(
-    oauth &&
-    nonEmpty(oauth.accessToken) &&
-    nonEmpty(oauth.refreshToken)
-  );
+  const oauth = (creds && creds.claudeAiOauth) || {};
+  return {
+    authed: nonEmpty(oauth.accessToken) && nonEmpty(oauth.refreshToken),
+    expiresAt: expiryOrNull(oauth.expiresAt),
+  };
 }
 
-function codexAuthed(fsModule, homeDir) {
+function codexCredential(fsModule, homeDir) {
   const auth = readJson(fsModule, path.join(homeDir, '.codex', 'auth.json'));
-  const tokens = auth && auth.tokens;
-  return !!(tokens && nonEmpty(tokens.access_token));
-}
-
-function agyAuthed(fsModule, homeDir) {
-  return fileHasText(
-    fsModule,
-    path.join(
-      homeDir,
-      '.gemini',
-      'antigravity-cli',
-      'antigravity-oauth-token',
-    ),
-  );
+  const tokens = (auth && auth.tokens) || {};
+  return {
+    authed: nonEmpty(tokens.access_token),
+    // The id_token carries the session expiry the user actually has to renew by
+    // logging in again; the access token is rotated on its own far more often.
+    expiresAt: jwtExpiresAt(tokens.id_token),
+  };
 }
 
 function hasApiKeyLikeValue(value, keyName = '') {
@@ -107,20 +117,21 @@ function hermesAuthed(fsModule, homeDir) {
   return hasApiKeyLikeValue(auth) || hermesConfigAuthed(fsModule, homeDir);
 }
 
-function agentAuthed(agentKey, installed, fsModule, homeDir) {
+// Login state plus, for the OAuth agents, when the stored credential runs out.
+// `expiresAt` is null whenever the agent has no such timestamp on disk, which is
+// the case for every host-managed API key.
+function agentCredential(agentKey, installed, fsModule, homeDir) {
   switch (agentKey) {
     case 'claude':
-      return claudeAuthed(fsModule, homeDir);
+      return claudeCredential(fsModule, homeDir);
     case 'codex':
-      return codexAuthed(fsModule, homeDir);
-    case 'agy':
-      return agyAuthed(fsModule, homeDir);
+      return codexCredential(fsModule, homeDir);
     case 'hermes':
-      return hermesAuthed(fsModule, homeDir);
+      return { authed: hermesAuthed(fsModule, homeDir), expiresAt: null };
     case 'opencode':
-      return installed;
+      return { authed: installed, expiresAt: null };
     default:
-      return false;
+      return { authed: false, expiresAt: null };
   }
 }
 
@@ -128,11 +139,12 @@ function buildStatuses({ fsModule, homeDir, commandExistsFn }) {
   const statuses = {};
   for (const agent of Object.values(AGENTS)) {
     const installed = commandExistsFn(agent.bin || agent.key);
-    const authed = agentAuthed(agent.key, installed, fsModule, homeDir);
+    const credential = agentCredential(agent.key, installed, fsModule, homeDir);
     statuses[agent.key] = {
       installed,
-      authed,
+      authed: credential.authed,
       authKind: AUTH_KIND[agent.key] || 'unknown',
+      credentialExpiresAt: credential.expiresAt,
     };
   }
   return statuses;

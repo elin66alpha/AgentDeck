@@ -9,7 +9,7 @@
 
 const path = require('path');
 
-const { defaultsFor, normalizeSettings } = require('./agent-options');
+const { normalizeSettings } = require('./agent-options');
 const { createJsonStore } = require('./json-store');
 
 const SETTINGS_FILE = path.join(__dirname, '..', 'agent-settings.json');
@@ -18,11 +18,12 @@ const SETTINGS_FILE = path.join(__dirname, '..', 'agent-settings.json');
 // hit the disk each time.
 const store = createJsonStore(SETTINGS_FILE, { defaultValue: {} });
 
-// Effective settings for a scope: stored selection normalized for the agent,
-// falling back to defaults for any group not yet chosen or not supported.
+// Effective settings for a scope: stored selection normalized for the agent.
+// normalizeSettings already falls back to the agent's default for any group that
+// is unset or unsupported, so the stored object goes in as-is — seeding it with
+// the defaults first only built the same catalog a second time.
 function getSettings(agentKey, scopeKey) {
-  const stored = store.load()[scopeKey] || {};
-  return normalizeSettings(agentKey, { ...defaultsFor(agentKey), ...stored });
+  return normalizeSettings(agentKey, store.load()[scopeKey] || {});
 }
 
 // Persist a (partial) selection for a scope. Only the provided groups change;
@@ -31,7 +32,6 @@ function getSettings(agentKey, scopeKey) {
 function setSettings(agentKey, scopeKey, partial) {
   return store.mutate((all) => {
     const merged = normalizeSettings(agentKey, {
-      ...defaultsFor(agentKey),
       ...(all[scopeKey] || {}),
       ...(partial || {}),
     });

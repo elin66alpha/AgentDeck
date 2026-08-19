@@ -1,0 +1,57 @@
+name: CI
+
+# Runs the verification commands from AGENTS.md. Keep the two jobs in sync with
+# that file when the expected commands change.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  flutter:
+    name: Flutter client
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          # Pinned so analyzer output stays reproducible; bump deliberately.
+          flutter-version: 3.41.9
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - run: flutter analyze --no-pub
+
+      - run: flutter test --no-pub
+
+  server:
+    name: Node backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      # node-pty builds a native addon; ubuntu-latest already ships Python 3,
+      # make, and a C++ compiler.
+      - run: npm ci
+        working-directory: server
+
+      - name: Syntax-check every backend source file
+        run: git ls-files '*.js' | xargs -r node --check
+        working-directory: server
+
+      - run: npm test
+        working-directory: server

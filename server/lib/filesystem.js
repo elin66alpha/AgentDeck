@@ -5,6 +5,7 @@ const os = require('os');
 const path = require('path');
 
 const { getDefaultWorkdir, ensureWorkdirExists } = require('./workdir');
+const { TOKENS_FILE } = require('./tokens');
 
 class FilesystemError extends Error {
   constructor(message, { status = 400, code = 'FS_ERROR' } = {}) {
@@ -32,7 +33,9 @@ function isInside(parent, child) {
 const SERVER_DIR = path.resolve(__dirname, '..');
 
 const SENSITIVE_PATHS = [
-  path.join(SERVER_DIR, 'tokens.json'),
+  // Taken from tokens.js rather than rebuilt here, so RELAY_TOKENS_FILE cannot
+  // move the token store out from under the denylist.
+  TOKENS_FILE,
   path.join(SERVER_DIR, '.env'),
   path.join(SERVER_DIR, 'credentials'),
   path.join(SERVER_DIR, 'push-subscriptions.json'),

@@ -734,47 +734,54 @@ class _ActiveMachineStatusTileState extends State<ActiveMachineStatusTile> {
       );
     }
 
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
+    // The tile's background must come from a Material, not a plain decoration:
+    // ListTile paints its ink splash on the nearest Material ancestor, so a
+    // DecoratedBox in between would hide the tap feedback.
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Material(
         color: Theme.of(context).colorScheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(12),
-      ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        leading: _isLoading
-            ? const SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : Icon(
-                Icons.lens,
-                color: _isOnline
-                    ? const Color(0xFF10B981)
-                    : const Color(0xFFEF4444),
-                size: 14,
-              ),
-        title: Text(
-          machine.displayName,
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-        ),
-        subtitle: Text(
-          _isLoading
-              ? context.l10n.loadingStatus
-              : (_isOnline ? context.l10n.online : context.l10n.offline),
-          style: TextStyle(
-            color: _isLoading
-                ? Theme.of(context).colorScheme.outline
-                : (_isOnline
-                      ? const Color(0xFF10B981)
-                      : const Color(0xFFEF4444)),
-            fontSize: 12,
-            fontWeight: FontWeight.w500,
+        clipBehavior: Clip.antiAlias,
+        child: ListTile(
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 4,
           ),
+          leading: _isLoading
+              ? const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Icon(
+                  Icons.lens,
+                  color: _isOnline
+                      ? const Color(0xFF10B981)
+                      : const Color(0xFFEF4444),
+                  size: 14,
+                ),
+          title: Text(
+            machine.displayName,
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+          ),
+          subtitle: Text(
+            _isLoading
+                ? context.l10n.loadingStatus
+                : (_isOnline ? context.l10n.online : context.l10n.offline),
+            style: TextStyle(
+              color: _isLoading
+                  ? Theme.of(context).colorScheme.outline
+                  : (_isOnline
+                        ? const Color(0xFF10B981)
+                        : const Color(0xFFEF4444)),
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          trailing: const Icon(Icons.chevron_right, size: 20),
+          onTap: _showStatusDialog,
         ),
-        trailing: const Icon(Icons.chevron_right, size: 20),
-        onTap: _showStatusDialog,
       ),
     );
   }

@@ -25,7 +25,6 @@ import '../machines/machine_credentials_screen.dart';
 import '../settings/getting_started_screen.dart';
 import 'agent_controls.dart';
 import 'bot_chat_controller.dart';
-import 'btw_dialog.dart';
 import 'chat_content.dart';
 import 'group_chat_screen.dart';
 
@@ -56,6 +55,15 @@ class _BotChatScreenState extends State<BotChatScreen>
   int _lastMessageCount = 0;
   bool _agentsSynced = false;
   bool _agentsRefreshing = false;
+
+  // "Search chats" jump: the picked hit's message is scrolled into view, then
+  // flashed with the matched term marked inside it for a moment. The anchor key
+  // is what the scroll targets once the row is actually built.
+  String? _highlightMessageId;
+  String? _highlightQuery;
+  GlobalKey? _highlightAnchor;
+  Timer? _highlightTimer;
+  bool _revealingMatch = false;
 
   @override
   void initState() {
@@ -89,6 +97,7 @@ class _BotChatScreenState extends State<BotChatScreen>
     widget.agentsController.removeListener(_onContextChanged);
     widget.machinesController.removeListener(_onContextChanged);
     widget.settingsController.removeListener(_onSettingsChanged);
+    _highlightTimer?.cancel();
     _input.dispose();
     _scroll.dispose();
     super.dispose();
@@ -215,6 +224,9 @@ class _BotChatScreenState extends State<BotChatScreen>
       final int count = widget.chatController.messageCount;
       final bool messageAdded = count != _lastMessageCount;
       _lastMessageCount = count;
+      // A search jump is driving the scroll position; don't yank it back down
+      // to the newest message while it walks toward the match.
+      if (_revealingMatch) return;
       final bool nearBottom = pos.pixels - pos.minScrollExtent < 280;
       // Follow streaming text only while pinned to the bottom; always snap when
       // a new message (user send / new reply bubble) is appended.
@@ -247,18 +259,30 @@ class _BotChatScreenState extends State<BotChatScreen>
   }
 
   Future<void> _showHistorySearch() async {
-    final ChatHistorySearchResult? result =
-        await showDialog<ChatHistorySearchResult>(
+    final ({ChatHistorySearchResult hit, String query})? picked =
+        await showDialog<({ChatHistorySearchResult hit, String query})>(
           context: context,
           builder: (BuildContext dialogContext) =>
               _HistorySearchDialog(chatController: widget.chatController),
         );
-    if (result == null) return;
+    if (picked == null || !mounted) return;
+    final ChatHistorySearchResult result = picked.hit;
+    final MachineCredential? machine = widget.machinesController.activeMachine;
+    if (machine == null) return;
+    final CliAgent agent = cliAgentByKey(result.agentKey);
     try {
-      await widget.chatController.selectSession(
-        cliAgentByKey(result.agentKey),
-        result.sessionId,
-      );
+      // A hit can live under another agent, so move the whole UI across, not
+      // just the chat controller: otherwise the next context sync sees the
+      // agents controller still pointing at the old agent and loads it back.
+      if (!await widget.agentsController.setActive(agent.key)) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(agentUnavailableMessage(context.l10n, agent))),
+        );
+        return;
+      }
+      await widget.chatController.loadFor(agent, machine);
+      await widget.chatController.selectSession(agent, result.sessionId);
     } catch (err) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -267,29 +291,70 @@ class _BotChatScreenState extends State<BotChatScreen>
           backgroundColor: Theme.of(context).colorScheme.error,
         ),
       );
-    }
-  }
-
-  Future<void> _showBtw() async {
-    final CliAgent agent = widget.agentsController.activeAgent;
-    const Set<String> btwAgents = <String>{'claude', 'codex', 'agy'};
-    if (!btwAgents.contains(agent.key)) return;
-    final String? sessionId = widget.chatController.activeSessionId;
-    if (widget.chatController.messageCount == 0 ||
-        sessionId == null ||
-        sessionId.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.l10n.btwNeedsConversation)),
-      );
       return;
     }
-    await BtwDialog.show(
-      context,
-      backend: widget.chatController.backend,
-      agentKey: agent.key,
-      sessionId: sessionId,
-      language: widget.settingsController.language,
+    if (!mounted) return;
+    await _revealSearchMatch(result.messageId, picked.query);
+  }
+
+  /// Scrolls the now-loaded conversation to the matched message and flashes it,
+  /// with the search term marked inside the bubble, for a couple of seconds.
+  Future<void> _revealSearchMatch(String messageId, String query) async {
+    final List<ChatMessage> messages = widget.chatController.messages;
+    final int index = messages.indexWhere(
+      (ChatMessage message) => message.id == messageId,
     );
+    if (index < 0) return;
+    _highlightTimer?.cancel();
+    final GlobalKey anchor = GlobalKey();
+    setState(() {
+      _highlightMessageId = messageId;
+      _highlightQuery = query;
+      _highlightAnchor = anchor;
+      _revealingMatch = true;
+    });
+    // The list is reverse:true, so row 0 is the newest message.
+    await _scrollToRow(messages.length - 1 - index, messages.length, anchor);
+    if (!mounted) return;
+    _revealingMatch = false;
+    _highlightTimer = Timer(const Duration(milliseconds: 2600), () {
+      if (!mounted) return;
+      setState(() {
+        _highlightMessageId = null;
+        _highlightQuery = null;
+        _highlightAnchor = null;
+      });
+    });
+  }
+
+  // The message list builds lazily, so the target row is usually not mounted
+  // yet and there is nothing to ensureVisible on. Walk toward it using the
+  // position's own average-extent estimate, which sharpens as more rows are
+  // built, then hand off to ensureVisible once the row exists.
+  Future<void> _scrollToRow(int row, int rowCount, GlobalKey anchor) async {
+    for (int attempt = 0; attempt < 24; attempt++) {
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted || !_scroll.hasClients) return;
+      final BuildContext? anchored = anchor.currentContext;
+      if (anchored != null) {
+        await Scrollable.ensureVisible(
+          anchored,
+          alignment: 0.5,
+          duration: const Duration(milliseconds: 240),
+          curve: Curves.easeOutCubic,
+        );
+        return;
+      }
+      final ScrollPosition pos = _scroll.position;
+      final double average =
+          (pos.maxScrollExtent + pos.viewportDimension) / rowCount;
+      final double target = (row * average).clamp(
+        pos.minScrollExtent,
+        pos.maxScrollExtent,
+      );
+      if ((target - pos.pixels).abs() < 1) return;
+      _scroll.jumpTo(target);
+    }
   }
 
   Future<void> _exportMarkdown() async {
@@ -354,11 +419,6 @@ class _BotChatScreenState extends State<BotChatScreen>
                 chatController: widget.chatController,
               ),
               actions: <Widget>[
-                _BtwButton(
-                  agentsController: widget.agentsController,
-                  chatController: widget.chatController,
-                  onPressed: _showBtw,
-                ),
                 _SearchButton(
                   chatController: widget.chatController,
                   onPressed: _showHistorySearch,
@@ -389,7 +449,6 @@ class _BotChatScreenState extends State<BotChatScreen>
                       machinesController: widget.machinesController,
                       chatController: widget.chatController,
                       onSearch: _showHistorySearch,
-                      onBtw: _showBtw,
                     ),
                   ListenableBuilder(
                     listenable: Listenable.merge(<Listenable>[
@@ -402,7 +461,7 @@ class _BotChatScreenState extends State<BotChatScreen>
                       }
                       final CliAgent agent =
                           widget.agentsController.activeAgent;
-                      // Only OAuth agents (claude/codex/agy) prompt to log in.
+                      // Only OAuth agents (claude/codex) prompt to log in.
                       // hermes/opencode manage their key on the host, so they
                       // never show the "not logged in" banner.
                       if (agent.authKind != 'oauth' ||
@@ -465,39 +524,50 @@ class _BotChatScreenState extends State<BotChatScreen>
                             )) {
                               return _ChatNotice(text: message.content);
                             }
+                            final bool highlighted =
+                                message.id == _highlightMessageId;
+                            final Widget bubble = _MessageBubble(
+                              message: message,
+                              highlightQuery: highlighted
+                                  ? _highlightQuery
+                                  : null,
+                              retryable: widget.chatController.isRetryable(
+                                message,
+                              ),
+                              streaming: widget.chatController.isStreaming(
+                                message,
+                              ),
+                              awaitingFirstToken: widget.chatController
+                                  .isAwaitingFirstToken(message),
+                              errorDetail: widget.chatController
+                                  .errorDetailFor(message),
+                              system: widget.chatController.isSystemMessage(
+                                message,
+                              ),
+                              cancelled: widget.chatController.isCancelled(
+                                message,
+                              ),
+                              queued: widget.chatController.isQueued(message),
+                              progressLines: widget.chatController
+                                  .progressLinesFor(message),
+                              onRetry: () =>
+                                  widget.chatController.retry(message),
+                              onCancelQueued: () =>
+                                  widget.chatController.cancelQueued(message),
+                              onOptionSelected: (String option) =>
+                                  widget.chatController.sendUserText(option),
+                            );
                             // RepaintBoundary isolates each bubble's painting so
                             // a streaming bubble does not repaint the visible
                             // history every frame.
                             return RepaintBoundary(
                               key: ValueKey<String>(message.id),
-                              child: _MessageBubble(
-                                message: message,
-                                retryable: widget.chatController.isRetryable(
-                                  message,
-                                ),
-                                streaming: widget.chatController.isStreaming(
-                                  message,
-                                ),
-                                awaitingFirstToken: widget.chatController
-                                    .isAwaitingFirstToken(message),
-                                errorDetail: widget.chatController
-                                    .errorDetailFor(message),
-                                system: widget.chatController.isSystemMessage(
-                                  message,
-                                ),
-                                cancelled: widget.chatController.isCancelled(
-                                  message,
-                                ),
-                                queued: widget.chatController.isQueued(message),
-                                progressLines: widget.chatController
-                                    .progressLinesFor(message),
-                                onRetry: () =>
-                                    widget.chatController.retry(message),
-                                onCancelQueued: () =>
-                                    widget.chatController.cancelQueued(message),
-                                onOptionSelected: (String option) =>
-                                    widget.chatController.sendUserText(option),
-                              ),
+                              child: highlighted
+                                  ? _SearchMatchFlash(
+                                      key: _highlightAnchor,
+                                      child: bubble,
+                                    )
+                                  : bubble,
                             );
                           },
                         ),
@@ -544,14 +614,12 @@ class _DesktopChatHeader extends StatelessWidget {
     required this.machinesController,
     required this.chatController,
     required this.onSearch,
-    required this.onBtw,
   });
 
   final CliAgentsController agentsController;
   final MachineCredentialsController machinesController;
   final BotChatController chatController;
   final VoidCallback onSearch;
-  final VoidCallback onBtw;
 
   @override
   Widget build(BuildContext context) {
@@ -573,11 +641,6 @@ class _DesktopChatHeader extends StatelessWidget {
                   machinesController: machinesController,
                   chatController: chatController,
                 ),
-              ),
-              _BtwButton(
-                agentsController: agentsController,
-                chatController: chatController,
-                onPressed: onBtw,
               ),
               _SearchButton(
                 chatController: chatController,
@@ -641,57 +704,6 @@ class _ChatTitle extends StatelessWidget {
                 ),
               ),
           ],
-        );
-      },
-    );
-  }
-}
-
-// The /btw sidekick entry point, sitting just left of search. It stays enabled
-// while the main agent is working — that is exactly when a quick side question
-// is useful. Empty conversations surface the normal "needs conversation" hint.
-class _BtwButton extends StatelessWidget {
-  const _BtwButton({
-    required this.agentsController,
-    required this.chatController,
-    required this.onPressed,
-  });
-
-  final CliAgentsController agentsController;
-  final BotChatController chatController;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: Listenable.merge(<Listenable>[
-        agentsController,
-        chatController,
-      ]),
-      builder: (BuildContext context, Widget? _) {
-        if (chatController.machine == null) {
-          return const SizedBox.shrink();
-        }
-        final String agentKey = agentsController.activeAgent.key;
-        const Set<String> btwAgents = <String>{'claude', 'codex', 'agy'};
-        if (!btwAgents.contains(agentKey)) {
-          return const SizedBox.shrink();
-        }
-        return IconButton(
-          icon: const SizedBox(
-            width: 32,
-            child: Text(
-              'BTW',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 0,
-              ),
-            ),
-          ),
-          tooltip: context.l10n.btwTooltip,
-          onPressed: onPressed,
         );
       },
     );
@@ -1216,6 +1228,9 @@ class _HistorySearchDialogState extends State<_HistorySearchDialog> {
   final TextEditingController _query = TextEditingController();
   Future<List<ChatHistorySearchResult>>? _future;
   bool _currentAgentOnly = false;
+  // The term the shown results actually came from, which is not necessarily
+  // what the field holds now. The caller highlights this one.
+  String _searchedFor = '';
 
   @override
   void dispose() {
@@ -1227,6 +1242,7 @@ class _HistorySearchDialogState extends State<_HistorySearchDialog> {
     final String query = _query.text.trim();
     if (query.isEmpty) return;
     setState(() {
+      _searchedFor = query;
       _future = widget.chatController.searchHistory(
         query,
         currentAgentOnly: _currentAgentOnly,
@@ -1271,7 +1287,9 @@ class _HistorySearchDialogState extends State<_HistorySearchDialog> {
                 child: _HistorySearchResults(
                   future: _future,
                   onSelected: (ChatHistorySearchResult result) =>
-                      Navigator.of(context).pop(result),
+                      Navigator.of(context).pop(
+                        (hit: result, query: _searchedFor),
+                      ),
                 ),
               ),
             ],
@@ -1690,19 +1708,68 @@ class _ChatNotice extends StatelessWidget {
   }
 }
 
-// The turn's persisted execution steps, minus agy's generic "working" ping which
-// carries no information once the answer is in (agy's real reasoning is folded
-// from its plan preamble instead).
+// The turn's persisted execution steps.
 List<String> _persistedSteps(ChatMessage message) {
   final Object? raw = message.metadata['progressLines'];
   if (raw is! List) return const <String>[];
   return raw
       .whereType<String>()
-      .where(
-        (String line) =>
-            line.trim().isNotEmpty && line != 'Antigravity is working...',
-      )
+      .where((String line) => line.trim().isNotEmpty)
       .toList(growable: false);
+}
+
+/// Pulses a tint behind the message a "search chats" jump landed on, so the eye
+/// finds the row once the list stops scrolling. Only ever wraps that one row:
+/// the fade runs on mount and the wrapper is dropped when the highlight clears.
+class _SearchMatchFlash extends StatefulWidget {
+  const _SearchMatchFlash({required this.child, super.key});
+
+  final Widget child;
+
+  @override
+  State<_SearchMatchFlash> createState() => _SearchMatchFlashState();
+}
+
+class _SearchMatchFlashState extends State<_SearchMatchFlash>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _fade = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 220),
+    reverseDuration: const Duration(milliseconds: 520),
+  );
+  Timer? _hold;
+
+  @override
+  void initState() {
+    super.initState();
+    _fade.forward();
+    _hold = Timer(const Duration(milliseconds: 1500), () {
+      if (mounted) _fade.reverse();
+    });
+  }
+
+  @override
+  void dispose() {
+    _hold?.cancel();
+    _fade.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final Color tint = Theme.of(context).colorScheme.tertiary;
+    return AnimatedBuilder(
+      animation: _fade,
+      builder: (BuildContext context, Widget? child) => DecoratedBox(
+        decoration: BoxDecoration(
+          color: tint.withValues(alpha: 0.18 * _fade.value),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: child,
+      ),
+      child: widget.child,
+    );
+  }
 }
 
 class _MessageBubble extends StatelessWidget {
@@ -1719,9 +1786,15 @@ class _MessageBubble extends StatelessWidget {
     required this.onRetry,
     required this.onCancelQueued,
     required this.onOptionSelected,
+    this.highlightQuery,
   });
 
   final ChatMessage message;
+
+  /// Set only while this bubble is the revealed "search chats" hit; marks the
+  /// term inside the rendered text.
+  final String? highlightQuery;
+
   final bool retryable;
   final bool streaming;
   final bool awaitingFirstToken;
@@ -1765,7 +1838,8 @@ class _MessageBubble extends StatelessWidget {
             segments.isNotEmpty ? segments.last.text : message.content,
           )
         : null;
-    // agy opens with an "I will …" plan; fold it away on the finished bubble.
+    // Claude and Codex often open with an "I will …" plan; fold it away on the
+    // finished bubble.
     final ({String plan, String body})? planSplit = (!isUser &&
             !system &&
             !streaming &&
@@ -1811,6 +1885,7 @@ class _MessageBubble extends StatelessWidget {
                     segments: segments,
                     color: textColor,
                     formatInlineEmphasis: !streaming,
+                    highlightQuery: highlightQuery,
                   )
                 else if (message.content.isNotEmpty)
                   if (planSplit != null)
@@ -1825,6 +1900,7 @@ class _MessageBubble extends StatelessWidget {
                             text: planSplit.plan,
                             color: textColor,
                             formatInlineEmphasis: true,
+                            highlightQuery: highlightQuery,
                           ),
                         ),
                         const SizedBox(height: 8),
@@ -1832,6 +1908,7 @@ class _MessageBubble extends StatelessWidget {
                           text: planSplit.body,
                           color: textColor,
                           formatInlineEmphasis: true,
+                          highlightQuery: highlightQuery,
                         ),
                       ],
                     )
@@ -1840,6 +1917,7 @@ class _MessageBubble extends StatelessWidget {
                       text: message.content,
                       color: textColor,
                       formatInlineEmphasis: !isUser && !streaming,
+                      highlightQuery: highlightQuery,
                     ),
                 if (optionPrompt != null)
                   OptionButtons(

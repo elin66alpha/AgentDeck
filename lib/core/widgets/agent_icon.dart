@@ -11,7 +11,6 @@ String? agentIconAssetPath(String key, Brightness brightness) {
     'codex' => dark
         ? 'assets/agent_icons/codex_inverse.png'
         : 'assets/agent_icons/codex.png',
-    'agy' => 'assets/agent_icons/agy.png',
     'opencode' => 'assets/agent_icons/opencode.png',
     'hermes' => 'assets/agent_icons/hermes.png',
     _ => null,

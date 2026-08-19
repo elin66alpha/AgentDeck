@@ -2,122 +2,155 @@
 
 # Relay
 
-**A private remote control for AI coding agents running on your own machine.**
+**Run AI coding agents on your machine. Control them from any screen.**
 
-[中文](README.zh-CN.md) · [Backend setup](backends/README.md) ·
+A private, self-hosted remote cockpit for Claude Code, Codex, OpenCode, and Hermes.
+
+![Flutter client](https://img.shields.io/badge/client-Flutter-02569B?logo=flutter&logoColor=white)
+![Node.js backend](https://img.shields.io/badge/backend-Node.js_18%2B-339933?logo=node.js&logoColor=white)
+![Self-hosted](https://img.shields.io/badge/deployment-self--hosted-5B5BD6)
+![MIT License](https://img.shields.io/badge/license-MIT-2F855A)
+
+[中文](README.zh-CN.md) · [Install a backend](backends/README.md) ·
 [Security](SECURITY.md) · [Handbook](docs/handbook.md)
 
 </div>
 
-Relay keeps Claude Code, Codex, Antigravity, OpenCode, and Hermes on the machine
-where your projects, shell, and credentials already live. It gives you one
-Flutter app for phone, Web, and desktop so you can reconnect to those local CLI
-agents without moving the projects to a hosted service.
+<a href="assets/screenshots/relay-overview-web.png">
+  <img src="assets/screenshots/relay-overview-web.png" alt="Relay home screen showing connected coding agents, recent sessions, and a multi-agent Swarm" width="100%">
+</a>
 
-There is no Relay cloud account or default backend. You run the Node.js backend,
-generate an encrypted credential, and import it into the clients you trust.
+Relay leaves your source code, shell access, and CLI credentials on the computer
+you control. Its Flutter client connects from phone, Web, or desktop to a small
+Node.js backend running beside your projects—there is no Relay cloud account and
+no hosted middleman.
+
+<table>
+  <tr>
+    <td width="33%" align="center">🖥️<br><strong>Runs where your code lives</strong><br>Your agents and projects stay on your backend machine.</td>
+    <td width="33%" align="center">📱<br><strong>One client, every screen</strong><br>Use the same interface on mobile, Web, and desktop.</td>
+    <td width="33%" align="center">🔐<br><strong>Private by design</strong><br>Import an encrypted, revocable credential for each device.</td>
+  </tr>
+</table>
+
+## See Relay in 60 seconds
+
+### Keep real coding sessions within reach
+
+Stream replies, cancel a turn, search history, export Markdown, and switch away
+while work continues. Each `workdir + agent` context supports up to eight named,
+resumable conversations.
+
+<a href="assets/screenshots/relay-chat-web.png">
+  <img src="assets/screenshots/relay-chat-web.png" alt="A persistent Claude Code conversation in the Relay Web client" width="100%">
+</a>
+
+### Chat, coordinate, and manage files from mobile
+
+<table>
+  <tr>
+    <td width="33%" align="center"><a href="assets/screenshots/relay-chat-mobile.png"><img src="assets/screenshots/relay-chat-mobile.png" alt="Relay agent chat on mobile" width="100%"></a></td>
+    <td width="33%" align="center"><a href="assets/screenshots/relay-swarm-mobile.png"><img src="assets/screenshots/relay-swarm-mobile.png" alt="Relay multi-agent Swarm on mobile" width="100%"></a></td>
+    <td width="33%" align="center"><a href="assets/screenshots/relay-files-mobile.png"><img src="assets/screenshots/relay-files-mobile.png" alt="Relay remote file browser on mobile" width="100%"></a></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Persistent chat</strong><br>Follow a long-running agent session from anywhere.</td>
+    <td align="center"><strong>Swarms</strong><br>Let specialized agents work in one shared transcript.</td>
+    <td align="center"><strong>Remote files</strong><br>Browse, upload, download, and change the active work tree.</td>
+  </tr>
+</table>
+
+<sub>These screenshots were captured in Chromium against an isolated demo backend; they contain no production credentials or project data.</sub>
+
+## How it fits together
 
 ```mermaid
 flowchart LR
-    C["Phone · Web · Desktop"] -->|"encrypted device credential"| B["Your Relay backend"]
-    B --> A["Claude Code · Codex · Agy · OpenCode · Hermes"]
-    B --> F["Your projects and files"]
+    C["Flutter client<br/>Phone · Web · Desktop"]
+    R["Relay backend<br/>Node.js on your machine"]
+    A["Persistent agent sessions<br/>Claude · Codex · OpenCode · Hermes"]
+    F["Projects and files"]
+    T["Resumable PTY shell"]
+
+    C -->|"authenticated HTTP + SSE"| R
+    R -->|"local CLI protocols"| A
+    R -->|"filesystem policy"| F
+    C -. "single-use WebSocket ticket" .-> T
+    R --> T
 ```
 
-## Current capabilities
+The active workdir belongs to each client and is sent on every request. A
+conversation is scoped by `workdir + agent + session`, so unrelated sessions
+can run concurrently without sharing a global backend directory.
 
-- **Live agent chat.** Stream replies, cancel turns, preserve multi-part agent
-  updates, and continue long work while switching between conversations.
-- **Named conversations.** Each workdir and agent supports up to eight persistent
-  sessions with shared cross-device history and running-state indicators.
-- **Agent status and login.** See installed/authenticated state for all five
-  agents. Relay can bridge Claude, Codex, and Agy OAuth on compatible backend
-  hosts; OpenCode and Hermes credentials stay host-managed.
-- **Per-agent controls.** Select model, reasoning effort, and permissions in the
-  composer. Claude Code and Codex also have a Fast mode switch, off by default;
-  fast responses may consume more quota or cost more.
-- **Live Codex catalog.** Relay reads structured model metadata and each model's
-  supported reasoning levels from the installed Codex CLI, with safe fallbacks.
-- **Swarms.** Put several agents in one transcript, give each member a work tree,
-  model, effort, permission, nickname, and persona, then summon members with
-  `@mentions`. Multiple members run in parallel from one transcript snapshot.
-  Swarms can be saved and imported as JSON templates.
-- **Read-only BTW side conversations.** Ask Claude, Codex, or Agy a side question
-  without changing the main task's native session.
-- **Remote files.** Browse absolute paths allowed by the backend, change the
-  workdir, upload files, and download files or zipped folders.
-- **SSH terminal.** Open **Manage credentials → Enter SSH** for one resumable
-  terminal on the current backend machine. It runs as the backend OS user and
-  follows the app's Light/Dark appearance. Web bundles a terminal monospace
-  font so Chromium keeps normal horizontal character spacing.
-- **Quota workflows.** View Claude, Codex, and Agy usage. Claude and Codex can
-  queue one prompt for the next detected five-hour reset.
-- **Notifications.** Live local/browser alerts plus optional Web Push and Android
-  FCM for configured deployments.
+## What you can do
+
+| | Capability | What it gives you |
+|---|---|---|
+| 💬 | **Live, persistent chat** | Streaming replies, cancellation, named sessions, cross-device history, search, and Markdown export. |
+| 🐝 | **Multi-agent Swarms** | Shared transcripts, per-member roles and controls, parallel waves, bounded `@mention` handoffs, and reusable JSON templates. |
+| 🎛️ | **Agent controls** | Model, reasoning effort, permission tier, install/auth status, credential-expiry countdown, and Fast mode for Claude/Codex. |
+| 📁 | **Files and terminal** | Allowed-path browsing, uploads, downloads, zipped folders, workdir switching, and one resumable PTY per device credential. |
+| 📊 | **Quota workflows** | Claude/Codex usage views plus one queued prompt for the next detected five-hour reset. |
+| 🔔 | **Notifications** | In-app/browser alerts, with optional Web Push and Android FCM for configured deployments. |
+
+Claude Code and Codex are the primary integrations. OpenCode and Hermes are
+available as experimental, host-managed integrations. All four keep their
+credentials on the backend host; Relay never logs an agent in for you.
 
 ## Quick start
 
-### 1. Prepare a backend
+### 1. Prepare the backend machine
 
-You need a Linux, macOS, or Windows machine with Node.js 18+ and at least one
-supported CLI installed. Claude, Codex, and Agy must be logged in; OpenCode and
-Hermes provider setup is managed on that host.
+Install Node.js 18+ and at least one supported CLI on Linux, macOS, or Windows.
+Claude and Codex must already be logged in on that host; OpenCode and Hermes use
+the provider configuration managed there.
 
-From the repository root, run the setup for the backend OS:
+Run the setup command for your backend OS from the repository root:
 
-```bash
-./backends/linux/setup.sh
-```
+| Backend OS | Setup command |
+|---|---|
+| Linux | `./backends/linux/setup.sh` |
+| macOS | `./backends/macos/setup.sh` |
+| Windows PowerShell | `.\backends\windows\setup.ps1` |
 
-```bash
-./backends/macos/setup.sh
-```
+The installer walks through direct access, a named Cloudflare Tunnel, or a
+temporary Quick Tunnel. Use HTTPS before exposing a direct deployment publicly.
+Linux also needs PM2 and the native tools listed in the
+[backend requirements](backends/README.md#requirements); Unix hosts need `zip`
+for folder downloads.
 
-```powershell
-.\backends\windows\setup.ps1
-```
+### 2. Import an encrypted device credential
 
-The installer offers three network modes:
+Setup prints an encrypted QR code and writes `.relay.png` / `.relay.json` files
+under `server/credentials/`. Import one by camera, image/file, or pasted JSON,
+then enter its passphrase. Camera scanning is mobile-only; every client supports
+file or pasted-JSON import. Generate a separate revocable credential for each
+device.
 
-| Mode | Use case | Important detail |
-|---|---|---|
-| Direct | Your own public address or reverse proxy | Use HTTPS before public exposure. |
-| Named Cloudflare Tunnel | Stable personal deployment | Requires a Cloudflare zone and `cloudflared`. |
-| Cloudflare Quick Tunnel | Short trial | URL may rotate after restart. |
+### 3. Pick a project and start working
 
-See [backends/README.md](backends/README.md) for service commands and platform
-details.
+Choose the backend, set the workdir, and open an agent conversation or Swarm.
+For service commands, networking details, and platform notes, continue with the
+[backend guide](backends/README.md).
 
-### 2. Import the device credential
+## Security boundary
 
-Setup prints an encrypted QR and saves `.relay.png` / `.relay.json` under
-`server/credentials/`. Import it by camera scan, image/file selection, or pasted
-JSON, then enter the passphrase chosen during generation. Generate a separate
-credential for each device.
+- Every HTTP API route requires a revocable bearer token; failed attempts are
+  rate-limited.
+- Credential exports use PBKDF2-HMAC-SHA256 and AES-256-GCM.
+- The terminal exchanges that bearer token for a short-lived, single-use
+  WebSocket ticket; the long-lived token never appears in the socket URL.
+- The file API denies known Relay, SSH, Claude, and Codex secret paths and can
+  be restricted further with `RELAY_FS_ROOTS`.
+- Quota reporting may read and refresh host OAuth files, but token values never
+  reach the Relay API or client.
 
-The app's first connection screen also contains a **Deploy backend** walkthrough.
-
-### 3. Choose a workdir and agent
-
-Select a machine, set the backend workdir, and open an agent conversation or
-Swarm. The active workdir is stored per client and sent with every API request.
-
-## Security summary
-
-- All HTTP API routes require a revocable bearer token.
-- The SSH terminal uses a short-lived, single-use WebSocket ticket derived from
-  that token; the long-lived bearer token is never placed in the socket URL.
-- Credential exports are encrypted with PBKDF2-HMAC-SHA256 and AES-256-GCM.
-- The file API denies a specific set of Relay, SSH, Claude, and Codex secrets and
-  can be restricted further with `RELAY_FS_ROOTS`.
-- Failed bearer-token attempts are rate-limited.
-- Public deployments should terminate TLS and run Relay as a restricted non-root
-  user.
-
-Relay is not a sandbox: every CLI and SSH terminal process has the permissions
-of the backend OS user. Read [SECURITY.md](SECURITY.md) and the
-[production checklist](docs/handbook.md#production-deployment) before exposing
-a backend outside a trusted network.
+> [!IMPORTANT]
+> Relay is not a sandbox. Agent and terminal processes have the permissions of
+> the backend OS user. Run it as a restricted non-root user, terminate TLS for
+> public deployments, and read [SECURITY.md](SECURITY.md) plus the
+> [production checklist](docs/handbook.md#production-deployment) first.
 
 ## Development
 
@@ -125,32 +158,32 @@ a backend outside a trusted network.
 flutter pub get
 flutter analyze --no-pub
 flutter test --no-pub
+npm --prefix server install
 npm --prefix server test
 ```
 
-Run the client with `flutter run`. For a self-hosted Web build:
+Run the client with `flutter run`. To serve a self-hosted Web build:
 
 ```bash
 flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn
 npm --prefix server start
 ```
 
-Desktop runner projects exist for Windows, macOS, and Linux. Windows release
-builds have been exercised; macOS/Linux packaging and secure-storage validation
-are still less mature. See [the handbook](docs/handbook.md#development-and-builds).
-
-## Project layout
+The Web flags intentionally disable the service worker and bundle CanvasKit
+locally. Windows release builds have been exercised; macOS/Linux desktop
+packaging and secure-storage validation are less mature. See the
+[development handbook](docs/handbook.md#development-and-builds).
 
 ```text
 Relay/
 ├── lib/          shared Flutter client
 ├── server/       Node.js backend and tests
 ├── backends/     OS-specific install/service adapters
-├── assets/       icons and UI assets
-├── docs/         durable operations and architecture handbook
-├── scripts/      development and deployment helpers
+├── docs/         operations and architecture handbook
+├── scripts/      development, deployment, and screenshot helpers
 └── test/         Flutter tests
 ```
 
 Contributors and coding agents should read [AGENTS.md](AGENTS.md). Release
-history is in [CHANGELOG.md](CHANGELOG.md).
+history is in [CHANGELOG.md](CHANGELOG.md), and Relay is released under the
+[MIT License](LICENSE).

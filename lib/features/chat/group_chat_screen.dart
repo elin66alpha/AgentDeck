@@ -1217,7 +1217,7 @@ class _SwarmFormDialogState extends State<_SwarmFormDialog> {
       config[group],
       modelId: modelId,
     );
-    // Bound the width and let the button ellipsize: some catalogs (agy, opencode)
+    // Bound the width and let the button ellipsize: some catalogs (opencode)
     // have long labels that would otherwise overflow the row.
     return SizedBox(
       width: 188,

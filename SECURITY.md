@@ -22,7 +22,11 @@ already use.
 The credential generator creates a `relay.credentials.v1` QR/JSON envelope with
 the machine id/name, backend URL, and one bearer token. The envelope uses
 PBKDF2-HMAC-SHA256 with 600,000 iterations plus AES-256-GCM with a random salt
-and nonce. Its passphrase is entered interactively and is not written to disk.
+and nonce. A passphrase entered at the interactive prompt is not saved by the
+generator. `--passphrase` and `RELAY_CREDENTIAL_PASSPHRASE` exist for unattended
+setup and should be avoided otherwise: the flag is visible in process listings
+and can persist in shell history, while the environment variable is visible to
+the process and can persist in `.env` or another launcher configuration.
 
 The backend stores bearer-token records and metadata in `server/tokens.json`.
 That file is a secret and is written owner-only. Native
@@ -37,7 +41,12 @@ Recommended practice:
 - revoke and delete a token when a device is lost or retired;
 - regenerate credentials after changing `PUBLIC_BASE_URL`;
 - never commit `.env`, tokens, credential exports, push keys, history, sessions,
-  agent settings, groups, or CLI login state.
+  agent settings, groups, CLI login state, or FCM service-account files.
+
+Generating a new credential deletes old QR/JSON export files, but it does not
+revoke previously issued device tokens. The backend status panel lists token
+ids, device metadata, and last-use time so each old token can be revoked and
+then deleted deliberately.
 
 ## API protections
 
@@ -54,17 +63,26 @@ Implemented controls include:
 - token revocation and deletion;
 - a 600-request/minute/IP limit for ordinary API requests;
 - a separate 15-failed-auth-attempt/minute/IP limit;
-- streaming chat/SSE/login and file-transfer routes excluded from the general
+- streaming chat/SSE and file-transfer routes excluded from the general
   request counter while still requiring authentication;
 - `trust proxy` restricted to loopback so a direct client cannot spoof
   `X-Forwarded-For`;
 - a startup warning when a routable public URL uses plaintext HTTP.
 
-The in-app Claude/Codex/Agy login bridge starts the real CLI in a backend PTY.
-It returns authorization URLs and status only, redacts URLs from diagnostic
-output, and never returns stored OAuth tokens. The bridge currently depends on
-GNU-compatible `script -qfec`; log in directly on hosts without it. OpenCode and
-Hermes keys are managed outside Relay on the backend host.
+Relay never logs a CLI agent in. Every agent's credential is created on the
+backend host with that CLI's own login flow or provider configuration.
+`server/lib/agent-status.js` reads authentication state and, for Claude Code and
+Codex, the stored OAuth expiry timestamp. `server/lib/usage.js` additionally
+reads their OAuth tokens for quota queries and can refresh an expired access
+token in the CLI's credential file. Token values may therefore be sent to the
+provider's OAuth and API endpoints, but neither Relay's API nor the app ever
+receives them.
+
+Quota reporting is not passive for every provider. Codex usage discovery sends
+a minimal Responses request to obtain quota headers. The enabled-by-default
+Claude keepalive sends a one-output-token request when its five-hour window is
+idle. Either request can consume provider quota; disable the latter with
+`ENABLE_CLAUDE_KEEPALIVE=false` if that tradeoff is unwanted.
 
 ## SSH terminal
 
@@ -107,14 +125,15 @@ variants. A directory download is also rejected when its tree would contain a
 denied path.
 
 This list is intentionally precise, not a promise to detect every secret. It
-does not automatically cover arbitrary Agy, OpenCode, Hermes, provider, or
+does not automatically cover arbitrary OpenCode, Hermes, provider, or
 service-account files. Set `RELAY_FS_ROOTS` to a comma-separated allowlist of
 absolute directories and run Relay as a restricted OS user. The allowlist
 limits the file API only; it does not change what a launched CLI can access.
 
 Uploads stream to a temporary file and default to 100 MB. Downloads default to
 300 MB. Configure smaller proxy and Relay limits when the deployment does not
-need those sizes.
+need those sizes. Unix directory downloads invoke the host's `zip` command;
+Windows uses PowerShell `Compress-Archive`.
 
 ## Production requirements
 
@@ -137,7 +156,7 @@ See the [production checklist](docs/handbook.md#production-deployment).
 
 ## What Relay does not do
 
-- It does not sandbox Claude Code, Codex, Agy, OpenCode, or Hermes.
+- It does not sandbox Claude Code, Codex, OpenCode, or Hermes.
 - It cannot stop an enabled fast mode or high-permission agent from consuming
   provider quota or changing files within its effective access.
 - It cannot protect an already compromised backend host or browser profile.

@@ -5,7 +5,9 @@ const { randomUUID } = require('crypto');
 
 const { createJsonStore } = require('./json-store');
 
-const SCHEDULES_FILE = path.join(__dirname, '..', 'quota-schedules.json');
+const SCHEDULES_FILE = process.env.RELAY_QUOTA_SCHEDULES_FILE
+  ? path.resolve(process.env.RELAY_QUOTA_SCHEDULES_FILE)
+  : path.join(__dirname, '..', 'quota-schedules.json');
 const MAX_PROMPT_LENGTH = 12000;
 const RESET_GRACE_MS = 10 * 60 * 1000;
 // Keep the file bounded: all live (pending/running) schedules are always kept,

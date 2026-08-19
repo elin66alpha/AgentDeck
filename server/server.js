@@ -17,9 +17,8 @@ const {
   getAgent,
   listAgents,
   runAgent,
-  runBtw,
-  runBtwAgent,
-  clearSession,
+  purgeSession,
+  shutdownPools,
 } = require('./lib/agents');
 const {
   WorkdirError,
@@ -55,6 +54,7 @@ const push = require('./lib/push');
 const fcm = require('./lib/fcm');
 const { notifyAll } = require('./lib/notify');
 const { startQuotaWatch } = require('./lib/quota-watch');
+const { startClaudeQuotaKeepalive } = require('./lib/quota-keepalive');
 const { authStatus } = require('./lib/auth-status');
 const { buildDiagnostics } = require('./lib/diagnostics');
 const {
@@ -103,15 +103,14 @@ const createSessionsRouter = require('./routes/sessions');
 const createQuotaRouter = require('./routes/quota');
 const createPushRouter = require('./routes/push');
 const createMetaRouter = require('./routes/meta');
-const createBtwRouter = require('./routes/btw');
 const createGroupRouter = require('./routes/group');
-const createAgentAuthRouter = require('./routes/agent-auth');
 const createTerminalRouter = require('./routes/terminal');
 
 const PORT = parseInt(process.env.PORT || '8787', 10);
 const HOST = process.env.HOST || '127.0.0.1';
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || '').replace(/\/+$/, '');
 const ENABLE_QUOTA_WATCH = process.env.ENABLE_QUOTA_WATCH !== 'false';
+const ENABLE_CLAUDE_KEEPALIVE = process.env.ENABLE_CLAUDE_KEEPALIVE !== 'false';
 const WEB_BUILD_DIR = path.join(__dirname, '..', 'build', 'web');
 // Hard cap on a single download (file, or the uncompressed total behind a zip).
 // Public tunnels can relay slowly or enforce throughput limits, so we refuse
@@ -127,10 +126,9 @@ const MAX_UPLOAD_BYTES = parseInt(
   process.env.UPLOAD_MAX_BYTES || String(100 * 1024 * 1024),
   10,
 );
-// Cap a single chat prompt. The prompt travels to the CLI as one argv token and
-// Linux limits a single argument to ~128KB (MAX_ARG_STRLEN), so anything larger
-// could never reach the agent — fail it with a clear error instead of a
-// confusing spawn failure. Override with PROMPT_MAX_BYTES.
+// Cap a single chat prompt before it enters an SDK or JSON-RPC session. Swarm
+// prompt construction uses the same budget so an accumulated transcript cannot
+// grow without bound. Override with PROMPT_MAX_BYTES.
 const MAX_PROMPT_BYTES = parseInt(
   process.env.PROMPT_MAX_BYTES || String(100 * 1024),
   10,
@@ -159,10 +157,8 @@ function isStreamingApiPath(req) {
     case '/events':
     case '/chat':
     case '/group/chat':
-    case '/btw':
     case '/fs/download':
     case '/fs/upload':
-    case '/agent-auth/login/start':
       return true;
     default:
       return false;
@@ -250,10 +246,10 @@ function streamUploadToFile(req, targetPath, maxBytes) {
   });
 }
 
-// Compress responses before they cross the tunnel. The web bundle is the bulk of
-// first-load bytes (main.dart.js ~3.6MB + canvaskit.wasm ~7MB); gzip cuts it ~60%,
-// turning a multi-minute first load into seconds. `compressible` does not flag
-// application/wasm, so allow it explicitly. Streaming/SSE responses set
+// Compress responses before they cross the tunnel. The JavaScript and CanvasKit
+// bundles dominate first-load bytes, so compression materially reduces startup
+// time. `compressible` does not flag application/wasm, so allow it explicitly.
+// Streaming/SSE responses set
 // `Cache-Control: no-transform`, which compression honors by skipping them.
 app.use(
   compression({
@@ -828,7 +824,7 @@ const routeContext = {
   buildUsageReport,
   cancelQuotaSchedule,
   clearHistory,
-  clearSession,
+  purgeSession,
   createChatResponder,
   createChatSession,
   createQuotaSchedule,
@@ -868,8 +864,6 @@ const routeContext = {
   resolveUploadTarget,
   revokeTokenById,
   runAgentTurn,
-  runBtw,
-  runBtwAgent,
   runningScopes,
   safeDownloadName,
   scopeChains,
@@ -898,9 +892,7 @@ app.use(createMetaRouter(routeContext));
 app.use(createPushRouter(routeContext));
 app.use(createFsRouter(routeContext));
 app.use(createChatRouter(routeContext));
-app.use(createBtwRouter(routeContext));
 app.use(createGroupRouter(routeContext));
-app.use(createAgentAuthRouter(routeContext));
 app.use(createSessionsRouter(routeContext));
 app.use(createQuotaRouter(routeContext));
 app.use(createTerminalRouter(routeContext));
@@ -912,7 +904,7 @@ if (fs.existsSync(path.join(WEB_BUILD_DIR, 'index.html'))) {
     setHeaders(res, filePath) {
       const rel = path.relative(WEB_BUILD_DIR, filePath);
       // CanvasKit is pinned to the Flutter engine revision and is effectively
-      // immutable between SDK upgrades; cache the 7MB wasm hard so it downloads
+      // immutable between SDK upgrades; cache the wasm hard so it downloads
       // once and is then served from the browser cache with no request at all.
       if (rel.split(path.sep)[0] === 'canvaskit') {
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
@@ -921,7 +913,7 @@ if (fs.existsSync(path.join(WEB_BUILD_DIR, 'index.html'))) {
       // Other files (index.html, *.js, assets) keep their filenames across builds,
       // so allow caching but always revalidate: a matching ETag returns a tiny 304
       // instead of re-sending the bytes. Never `no-store` — that re-downloaded the
-      // whole ~11MB bundle on every load, which is what made the web take minutes.
+      // whole Web bundle on every load, which can make startup very slow.
       res.setHeader('Cache-Control', 'no-cache');
     },
   }));
@@ -950,6 +942,9 @@ process.on('exit', flushHistoryForShutdown);
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.once(signal, () => {
     terminalManager.closeAll();
+    // Live agent sessions are children of this process; close them explicitly
+    // so a restart never leaves orphaned CLI processes holding memory.
+    shutdownPools().catch(() => {});
     flushHistoryForShutdown();
     process.exit(exitCodeForSignal(signal));
   });
@@ -958,10 +953,10 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
 const server = app.listen(PORT, HOST, () => {
   console.log(`Relay server listening on http://${HOST}:${PORT}`);
   // Warm the model-discovery cache off the request path. The first scan/spawn
-  // per agent is synchronous (agy even shells out to `agy models`), so priming
-  // it now keeps the first chat turn and options fetch fast.
+  // per agent is synchronous, so priming it now keeps the first chat turn and
+  // options fetch fast.
   setImmediate(() => {
-    for (const agent of ['claude', 'codex', 'agy']) {
+    for (const agent of ['claude', 'codex']) {
       try {
         describeAgent(agent);
       } catch (_err) {
@@ -1008,12 +1003,18 @@ const server = app.listen(PORT, HOST, () => {
           message,
           messageZh: info && info.messageZh,
           category: 'quota',
+          // Matches the tag an open client uses for the event-stream copy, so a
+          // browser that shows both collapses them into one notification.
+          tag: 'quota',
         });
         processDueQuotaSchedules(info).catch((err) => {
           console.error(`[quota:${info && info.key}] scheduled message runner failed: ${err.message}`);
         });
       },
     });
+  }
+  if (ENABLE_CLAUDE_KEEPALIVE) {
+    startClaudeQuotaKeepalive();
   }
 });
 terminalManager.attachServer(server);

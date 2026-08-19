@@ -120,9 +120,18 @@ class NotificationService {
 
   /// Show an immediate system notification. Returns false when unsupported or
   /// denied so callers can show an in-page fallback.
-  Future<bool> show({required String title, required String body}) async {
+  ///
+  /// [tag] identifies the alert rather than this particular showing of it. Two
+  /// notifications sharing a tag replace one another instead of stacking, so an
+  /// alert that reaches the device twice (say over the event stream and again
+  /// as a push) is only ever seen once. Untagged notifications always stack.
+  Future<bool> show({
+    required String title,
+    required String body,
+    String? tag,
+  }) async {
     if (kIsWeb) {
-      return showBrowserNotification(title: title, body: body);
+      return showBrowserNotification(title: title, body: body, tag: tag);
     }
     if (!_supported) return false;
     await init();
@@ -140,7 +149,7 @@ class NotificationService {
         WindowsNotificationDetails();
     try {
       await _plugin.show(
-        id: _nextId++,
+        id: tag == null ? _nextId++ : _idForTag(tag),
         title: title,
         body: body,
         notificationDetails: const NotificationDetails(
@@ -162,5 +171,16 @@ class NotificationService {
       );
       return false;
     }
+  }
+
+  /// A stable, non-negative 31-bit id for a tag. The platform plugins key
+  /// replacement off this id, so it has to depend only on the tag — a counter
+  /// would make every repeat a new notification.
+  int _idForTag(String tag) {
+    int hash = 0;
+    for (final int unit in tag.codeUnits) {
+      hash = (hash * 31 + unit) & 0x3fffffff;
+    }
+    return hash;
   }
 }

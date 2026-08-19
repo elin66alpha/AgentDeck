@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'package:markdown/markdown.dart' as md;
 
 import '../../core/i18n/app_strings.dart';
 import '../../core/models/chat_message.dart';
@@ -20,12 +21,16 @@ class SegmentedContent extends StatefulWidget {
     required this.segments,
     required this.color,
     required this.formatInlineEmphasis,
+    this.highlightQuery,
     super.key,
   });
 
   final List<MessageSegment> segments;
   final Color color;
   final bool formatInlineEmphasis;
+
+  /// See [MessageText.highlightQuery].
+  final String? highlightQuery;
 
   @override
   State<SegmentedContent> createState() => _SegmentedContentState();
@@ -43,6 +48,7 @@ class _SegmentedContentState extends State<SegmentedContent> {
           text: segment.text,
           color: widget.color,
           formatInlineEmphasis: widget.formatInlineEmphasis,
+          highlightQuery: widget.highlightQuery,
         ),
         if (segment.createdAt != null)
           Padding(
@@ -71,6 +77,14 @@ class _SegmentedContentState extends State<SegmentedContent> {
         nonEmpty.sublist(0, nonEmpty.length - 1);
     final MessageSegment last = nonEmpty.last;
     final Color toggleColor = widget.color.withValues(alpha: 0.7);
+    // A search hit inside a collapsed progress update would otherwise be marked
+    // where nobody can see it, so reveal the stack while it is highlighted.
+    final String needle = widget.highlightQuery?.trim().toLowerCase() ?? '';
+    final bool expanded = _expanded ||
+        (needle.isNotEmpty &&
+            earlier.any(
+              (MessageSegment s) => s.text.toLowerCase().contains(needle),
+            ));
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -85,7 +99,7 @@ class _SegmentedContentState extends State<SegmentedContent> {
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
                 Icon(
-                  _expanded
+                  expanded
                       ? Icons.expand_less_rounded
                       : Icons.expand_more_rounded,
                   size: 16,
@@ -104,7 +118,7 @@ class _SegmentedContentState extends State<SegmentedContent> {
             ),
           ),
         ),
-        if (_expanded) ...<Widget>[
+        if (expanded) ...<Widget>[
           const SizedBox(height: 6),
           for (final MessageSegment segment in earlier) ...<Widget>[
             _segmentText(segment),
@@ -130,12 +144,17 @@ class MessageText extends StatefulWidget {
     required this.text,
     required this.color,
     required this.formatInlineEmphasis,
+    this.highlightQuery,
     super.key,
   });
 
   final String text;
   final Color color;
   final bool formatInlineEmphasis;
+
+  /// Term to mark inside this message while a "search chats" hit is being
+  /// revealed. Null in the normal case, which renders without any marking.
+  final String? highlightQuery;
 
   @override
   State<MessageText> createState() => _MessageTextState();
@@ -155,7 +174,8 @@ class _MessageTextState extends State<MessageText> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.text != widget.text ||
         oldWidget.color != widget.color ||
-        oldWidget.formatInlineEmphasis != widget.formatInlineEmphasis) {
+        oldWidget.formatInlineEmphasis != widget.formatInlineEmphasis ||
+        oldWidget.highlightQuery != widget.highlightQuery) {
       _cached = null;
     }
   }
@@ -178,19 +198,108 @@ class _MessageTextState extends State<MessageText> {
       height: 1.45,
       fontSize: 15,
     );
+    final String needle = widget.highlightQuery?.trim() ?? '';
     if (!widget.formatInlineEmphasis) {
       // Not SelectableText: a wrapping SelectionArea (see the message lists)
       // handles selection. SelectableText / MarkdownBody(selectable: true)
       // build overlay-based selection that registers a dependency on the
       // enclosing Scrollable and throws InheritedElement '_dependents.isEmpty'
       // when the conversation is torn down (e.g. creating/switching a session).
-      return Text(widget.text, style: style);
+      if (needle.isEmpty) return Text(widget.text, style: style);
+      return Text.rich(_markedSpan(widget.text, needle, style));
     }
     return MarkdownBody(
       data: _normalizeAgentMarkdown(widget.text),
       selectable: false,
       softLineBreak: true,
       styleSheet: _markdownStyleSheet(context, widget.color, style),
+      // The search term is marked by parsing it as its own inline element, so
+      // the surrounding markdown still renders normally around it.
+      inlineSyntaxes: needle.isEmpty
+          ? null
+          : <md.InlineSyntax>[_SearchHitSyntax(needle)],
+      builders: needle.isEmpty
+          ? const <String, MarkdownElementBuilder>{}
+          : <String, MarkdownElementBuilder>{
+              _searchHitTag: _SearchHitBuilder(style),
+            },
+    );
+  }
+}
+
+// Marker-pen colours rather than scheme colours: the mark has to stay readable
+// on both bubble backgrounds (primary for the user, surface for the agent) in
+// both themes, and reading as "search highlight" matters more than blending in.
+const Color _searchHitBackground = Color(0xFFFFD54F);
+const Color _searchHitForeground = Color(0xDD000000);
+const String _searchHitTag = 'relaySearchHit';
+
+// Colour only, no weight or size change: the mark comes and goes on its own
+// timer and must not reflow the paragraph under it.
+TextStyle _searchHitStyle(TextStyle? base) {
+  return (base ?? const TextStyle()).copyWith(
+    backgroundColor: _searchHitBackground,
+    color: _searchHitForeground,
+  );
+}
+
+/// Splits [text] on every case-insensitive occurrence of [needle], marking the
+/// matches. Used for the plain-text (non-markdown) rendering path.
+TextSpan _markedSpan(String text, String needle, TextStyle base) {
+  final TextStyle hit = _searchHitStyle(base);
+  final String haystack = text.toLowerCase();
+  final String lowered = needle.toLowerCase();
+  final List<TextSpan> spans = <TextSpan>[];
+  int cursor = 0;
+  while (true) {
+    final int at = haystack.indexOf(lowered, cursor);
+    if (at < 0) break;
+    if (at > cursor) {
+      spans.add(TextSpan(text: text.substring(cursor, at)));
+    }
+    spans.add(
+      TextSpan(text: text.substring(at, at + lowered.length), style: hit),
+    );
+    cursor = at + lowered.length;
+  }
+  if (cursor < text.length) {
+    spans.add(TextSpan(text: text.substring(cursor)));
+  }
+  return TextSpan(style: base, children: spans);
+}
+
+/// Turns each occurrence of the search term into a [_searchHitTag] element so
+/// the markdown builder can paint it without disturbing the rest of the parse.
+class _SearchHitSyntax extends md.InlineSyntax {
+  _SearchHitSyntax(String query)
+      : super(RegExp.escape(query), caseSensitive: false);
+
+  @override
+  bool onMatch(md.InlineParser parser, Match match) {
+    parser.addNode(md.Element.text(_searchHitTag, match[0]!));
+    return true;
+  }
+}
+
+class _SearchHitBuilder extends MarkdownElementBuilder {
+  _SearchHitBuilder(this.base);
+
+  final TextStyle base;
+
+  @override
+  Widget visitElementAfterWithContext(
+    BuildContext context,
+    md.Element element,
+    TextStyle? preferredStyle,
+    TextStyle? parentStyle,
+  ) {
+    // parentStyle carries whatever the enclosing markdown (bold, list, heading)
+    // resolved to, so the mark keeps the surrounding weight and size.
+    return Text.rich(
+      TextSpan(
+        text: element.textContent,
+        style: _searchHitStyle(parentStyle ?? base),
+      ),
     );
   }
 }
@@ -353,8 +462,8 @@ String _stripInlineMarkdown(String value) {
 }
 
 /// Splits a leading "here's my plan" preamble off an assistant answer so it can
-/// be folded away. agy (Antigravity) habitually opens with one or more "I will …"
-/// / "我将 …" planning paragraphs before the real answer. Returns (plan, body) when
+/// be folded away. Claude and Codex often open with one or more "I will …" /
+/// "我将 …" planning paragraphs before the real answer. Returns (plan, body) when
 /// such a preamble sits above a non-empty body, else null (so a message that is
 /// nothing but plan is never hidden).
 ({String plan, String body})? splitLeadingPlan(String text) {

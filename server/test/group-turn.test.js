@@ -13,7 +13,7 @@ const {
 const LABELS = {
   claude: 'Claude Code',
   codex: 'Codex',
-  agy: 'Antigravity',
+  opencode: 'OpenCode',
 };
 const labelFor = (key) => LABELS[key] || key;
 
@@ -33,7 +33,7 @@ test('authorOf prefers explicit metadata, then role/agent', () => {
 });
 
 test('parseMentions returns summoned members in order, de-duplicated', () => {
-  const members = ['claude', 'codex', 'agy'];
+  const members = ['claude', 'codex', 'opencode'];
   assert.deepEqual(
     parseMentions('hey @codex and @claude, then @codex again', members, labelFor),
     ['codex', 'claude'],
@@ -42,8 +42,8 @@ test('parseMentions returns summoned members in order, de-duplicated', () => {
 
 test('parseMentions only matches current members and ignores email-like tokens', () => {
   const members = ['claude', 'codex'];
-  // @agy is not a member; foo@codex is an email-like token (preceded by a word char).
-  assert.deepEqual(parseMentions('ping @agy please', members, labelFor), []);
+  // @opencode is not a member; foo@codex is an email-like token (preceded by a word char).
+  assert.deepEqual(parseMentions('ping @opencode please', members, labelFor), []);
   assert.deepEqual(parseMentions('mail foo@codex now', members, labelFor), []);
   assert.deepEqual(parseMentions('@claude go', members, labelFor), ['claude']);
 });
@@ -54,7 +54,7 @@ test('parseMentions matches by label slug as well as agent key', () => {
 });
 
 test('parseMentions ignores broad @all / @everyone aliases', () => {
-  const members = ['claude', 'codex', 'agy'];
+  const members = ['claude', 'codex', 'opencode'];
   assert.deepEqual(parseMentions('@all huddle up', members, labelFor), []);
   assert.deepEqual(parseMentions('@everyone huddle up', members, labelFor), []);
 });
@@ -105,6 +105,28 @@ test('buildGroupPrompt injects the member persona when given', () => {
   // No persona -> no role line.
   const plain = buildGroupPrompt({ selfLabel: 'Codex', delta, labelFor });
   assert.doesNotMatch(plain, /Your role in this swarm/);
+});
+
+test('buildGroupPrompt lists the members this one can summon', () => {
+  const delta = [human('start')];
+  const prompt = buildGroupPrompt({
+    selfLabel: 'Claude Code',
+    delta,
+    labelFor,
+    roster: [
+      { key: 'codex', label: 'Codex' },
+      { key: 'opencode', label: 'Schema owner' },
+    ],
+  });
+  // The @key form is what parseMentions always resolves, so it is what the
+  // agent is shown — a multi-word nickname alone would not parse.
+  assert.match(
+    prompt,
+    /Other members of this swarm: Codex \(@codex\), Schema owner \(@opencode\)\./,
+  );
+  // Without a roster (agent-to-agent summoning off) the prompt promises nothing.
+  const alone = buildGroupPrompt({ selfLabel: 'Claude Code', delta, labelFor });
+  assert.doesNotMatch(alone, /Other members of this swarm/);
 });
 
 test('buildGroupPrompt bounds the prompt and notes omitted history', () => {

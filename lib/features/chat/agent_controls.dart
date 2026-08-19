@@ -11,6 +11,18 @@ import '../../core/models/agent_options.dart';
 
 const List<String> _groupOrder = <String>['model', 'effort', 'permission'];
 
+/// Option catalogs describe what the installed CLI ships, not what the current
+/// scope selected, so one fetch serves every workdir on a machine. They are kept
+/// across opens because the composer rebuilds this widget every time its "+"
+/// drawer opens: without a cache each open showed a spinner and then jumped to
+/// its real height while the panel was still animating.
+final Map<String, AgentOptionsCatalog> _catalogCache =
+    <String, AgentOptionsCatalog>{};
+
+/// Drop the cached catalogs. Call this when the app switches machines: another
+/// backend host can have different CLIs, and different versions of them.
+void clearAgentOptionsCache() => _catalogCache.clear();
+
 IconData _groupIcon(String group) {
   switch (group) {
     case 'model':
@@ -91,6 +103,12 @@ class AgentControlsButtons extends StatefulWidget {
 class _AgentControlsButtonsState extends State<AgentControlsButtons> {
   AgentOptionsCatalog? _catalog;
   AgentSettings _settings = AgentSettings.empty;
+  // Settings are per workdir+agent, so unlike the catalog they are always
+  // fetched. Held as a future too: the buttons now render from the cached
+  // catalog before this lands, so a quick tap must wait for the real selection
+  // instead of opening a page on the defaults.
+  Future<AgentSettings> _settingsReady =
+      Future<AgentSettings>.value(AgentSettings.empty);
   bool _loading = true;
   bool _failed = false;
 
@@ -108,42 +126,65 @@ class _AgentControlsButtonsState extends State<AgentControlsButtons> {
     }
   }
 
+  void _adoptSettings(AgentSettings settings) {
+    _settings = settings;
+    _settingsReady = Future<AgentSettings>.value(settings);
+  }
+
   Future<void> _load() async {
     final String agentKey = widget.agentKey;
+    final AgentOptionsCatalog? cached = _catalogCache[agentKey];
+    final Future<AgentSettings> pending =
+        widget.backend.fetchAgentSettings(agentKey);
     setState(() {
-      _loading = true;
+      _catalog = cached;
+      _settingsReady = pending;
+      // A cached catalog already says which buttons exist, so the panel opens at
+      // its final size and this fetch only corrects it.
+      _loading = cached == null;
       _failed = false;
     });
     try {
       final List<Object> results = await Future.wait(<Future<Object>>[
         widget.backend.fetchAgentOptions(agentKey),
-        widget.backend.fetchAgentSettings(agentKey),
+        pending,
       ]);
       if (!mounted || agentKey != widget.agentKey) return;
+      final AgentOptionsCatalog catalog = results[0] as AgentOptionsCatalog;
+      _catalogCache[agentKey] = catalog;
       setState(() {
-        _catalog = results[0] as AgentOptionsCatalog;
-        _settings = results[1] as AgentSettings;
+        _catalog = catalog;
+        _adoptSettings(results[1] as AgentSettings);
         _loading = false;
       });
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || agentKey != widget.agentKey) return;
       setState(() {
         _loading = false;
-        _failed = true;
+        // A cached catalog is still worth showing; only a cold failure is fatal.
+        _failed = _catalog == null;
       });
+    }
+  }
+
+  Future<AgentSettings> _resolvedSettings() async {
+    try {
+      return await _settingsReady;
+    } catch (_) {
+      return _settings;
     }
   }
 
   Future<void> _openGroup(String group) async {
     final AgentOptionsCatalog? catalog = _catalog;
     if (catalog == null) return;
-    final String? modelId = catalog.resolveSelection(
-      'model',
-      _settings['model'],
-    );
+    final AgentSettings settings = await _resolvedSettings();
+    if (!mounted) return;
+    final String? modelId =
+        catalog.resolveSelection('model', settings['model']);
     final String current = catalog.resolveSelection(
           group,
-          _settings[group],
+          settings[group],
           modelId: modelId,
         ) ??
         '';
@@ -158,15 +199,17 @@ class _AgentControlsButtonsState extends State<AgentControlsButtons> {
           catalog: catalog,
           current: current,
           modelId: modelId,
-          fastEnabled: _settings['fast'] == 'on',
+          fastEnabled: settings['fast'] == 'on',
         ),
       ),
     );
-    if (!mounted) return;
-    if (result != null) {
-      setState(() => _settings = result);
-    }
-    await _load();
+    if (!mounted || result == null) return;
+    // The page saved the selection and, if it updated the CLI, refreshed the
+    // cached catalog. Adopting both is what a reload would have fetched.
+    setState(() {
+      _catalog = _catalogCache[widget.agentKey] ?? catalog;
+      _adoptSettings(result);
+    });
   }
 
   @override
@@ -428,6 +471,9 @@ class _AgentOptionPageState extends State<_AgentOptionPage> {
       if (!mounted) return;
       final AgentOptionsCatalog options = refreshed[0] as AgentOptionsCatalog;
       final AgentSettings settings = refreshed[1] as AgentSettings;
+      // The new binary can ship different models, so replace what the composer
+      // will draw from next time it opens.
+      _catalogCache[widget.agentKey] = options;
       final String? modelId = options.resolveSelection(
         'model',
         settings['model'],

@@ -12,6 +12,9 @@ const express = require('express');
 const scratchDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-group-route-'));
 process.env.RELAY_GROUPS_FILE = path.join(scratchDir, 'groups.json');
 process.env.RELAY_HISTORY_FILE = path.join(scratchDir, 'history.json');
+// Two agent-driven waves after the human's, so the chain and its cap are both
+// observable without running a long conversation.
+process.env.RELAY_SWARM_MAX_HOPS = '2';
 
 const history = require('../lib/history');
 const { sessionScopeKey } = require('../lib/chat-sessions');
@@ -32,6 +35,9 @@ const runCalls = [];
 // Events broadcast on the shared stream, so the test can assert the round's
 // lifecycle signals (group_message, group_done) reach other devices.
 const sentEvents = [];
+// Per-agent reply text, so a test can make one member @mention another. Empty
+// means the default "reply from <agent>", which mentions nobody.
+const scriptedReplies = new Map();
 
 function buildContext() {
   const sessionContextKeyFor = (agentKey, workdir) => `${workdir}${SEP}${agentKey}`;
@@ -59,8 +65,9 @@ function buildContext() {
         workdir: opts.workdir,
         settings: opts.settings,
       });
-      onEvent({ type: 'delta', text: `reply from ${agentKey}` });
-      return `reply from ${agentKey}`;
+      const reply = scriptedReplies.get(agentKey) || `reply from ${agentKey}`;
+      onEvent({ type: 'delta', text: reply });
+      return reply;
     },
   });
 
@@ -69,7 +76,7 @@ function buildContext() {
     activeRequests: new Map(),
     agentTurnDependencies,
     clearHistory: history.clearHistory,
-    clearSession: () => {},
+    purgeSession: async () => true,
     finalizeStaleStreamingHistory: history.finalizeStaleStreamingHistory,
     getAgent: (key) => AGENTS[key] || null,
     normalizeDeviceId: () => '',
@@ -186,6 +193,89 @@ test('same-message mentions run in parallel off one snapshot, not seeing each ot
   // concurrently instead of one-after-another.
   assert.ok(!codexCall.prompt.includes('reply from claude'));
   assert.ok(!claudeCall.prompt.includes('reply from codex'));
+});
+
+test('a member @mentioned by another member takes the next turn', async () => {
+  const created = await (await api('POST', '/api/groups', {
+    name: 'Relay Chain',
+    members: ['claude', 'codex'],
+  })).json();
+  const group = created.group;
+  scriptedReplies.set('claude', 'I mapped it out, @codex take the lexer');
+  scriptedReplies.set('codex', 'lexer done, nothing else needed');
+  const before = runCalls.length;
+
+  const round = await (await api('POST', '/api/group/chat', {
+    groupId: group.id,
+    prompt: '@claude start us off',
+  })).json();
+  scriptedReplies.clear();
+
+  // The human summoned one member; its reply summoned the other.
+  assert.deepEqual(
+    round.turns.map((t) => t.agent),
+    ['claude', 'codex'],
+  );
+  const codexCall = runCalls.slice(before).find((c) => c.agentKey === 'codex');
+  assert.ok(codexCall);
+  // The second wave snapshots again, so Codex is fed the reply that summoned it.
+  assert.match(codexCall.prompt, /Claude Code: I mapped it out, @codex take the lexer/);
+  // And it is told who else it can hand the floor to.
+  assert.match(codexCall.prompt, /Other members of this swarm: Claude Code \(@claude\)/);
+
+  const messages = (await (await api(
+    'GET',
+    `/api/group/history?groupId=${group.id}`,
+  )).json()).messages;
+  const assistants = messages.filter((m) => m.role === 'assistant');
+  assert.equal(assistants.length, 2);
+  assert.equal(assistants[0].metadata.summonedBy, 'human');
+  // The transcript records which member summoned the follow-up turn.
+  assert.equal(assistants[1].metadata.author, 'codex');
+  assert.equal(assistants[1].metadata.summonedBy, 'claude');
+});
+
+test('two members mentioning each other stop at the hop cap', async () => {
+  const created = await (await api('POST', '/api/groups', {
+    name: 'Relay Pingpong',
+    members: ['claude', 'codex'],
+  })).json();
+  const group = created.group;
+  // Each reply summons the other, forever, if nothing bounds the round.
+  scriptedReplies.set('claude', 'over to you @codex');
+  scriptedReplies.set('codex', 'back to you @claude');
+
+  const round = await (await api('POST', '/api/group/chat', {
+    groupId: group.id,
+    prompt: '@claude begin',
+  })).json();
+  scriptedReplies.clear();
+
+  // RELAY_SWARM_MAX_HOPS=2: the human's wave plus two agent-driven ones.
+  assert.deepEqual(
+    round.turns.map((t) => t.agent),
+    ['claude', 'codex', 'claude'],
+  );
+});
+
+test('a member mentioning itself does not summon another turn', async () => {
+  const created = await (await api('POST', '/api/groups', {
+    name: 'Relay Solo',
+    members: ['claude', 'codex'],
+  })).json();
+  const group = created.group;
+  scriptedReplies.set('claude', 'noting for myself, @claude follow up later');
+
+  const round = await (await api('POST', '/api/group/chat', {
+    groupId: group.id,
+    prompt: '@claude think out loud',
+  })).json();
+  scriptedReplies.clear();
+
+  assert.deepEqual(
+    round.turns.map((t) => t.agent),
+    ['claude'],
+  );
 });
 
 test('a later message still sees earlier replies, so cross-round stays collaborative', async () => {

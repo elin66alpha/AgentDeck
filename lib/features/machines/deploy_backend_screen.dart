@@ -260,8 +260,8 @@ const List<_DeployStep> _zhSteps = <_DeployStep>[
   _DeployStep(
     title: '准备一台后端机器',
     body: '一台你自己的电脑或服务器都行：家里的 PC、Mac，或一台云服务器。'
-        '先装好 Node.js 18+ 和至少一个 CLI 智能体（Claude Code、Codex、Antigravity 等）。'
-        '可在主机上登录，兼容的 OAuth agent 也可稍后在 Relay 中登录。',
+        '先装好 Node.js 18+ 和至少一个 CLI 智能体（Claude Code、Codex、OpenCode 或 Hermes），'
+        '并直接在主机上完成登录或 provider 配置；Relay 不代办 CLI 登录。',
   ),
   _DeployStep(
     title: '下载 Relay，运行安装脚本',
@@ -282,7 +282,7 @@ const List<_DeployStep> _zhSteps = <_DeployStep>[
   ),
   _DeployStep(
     title: '回到本页，连接前端',
-    body: '回到这个页面，三种方式任选其一：扫描二维码、上传二维码图片，或粘贴 JSON 内容。'
+    body: '回到这个页面：移动端可扫描二维码；所有平台都可上传二维码图片或粘贴 JSON 内容。'
         '然后输入你生成凭证时设置的密码。连接成功后，就能在应用里直接指挥后端的智能体了。',
   ),
 ];
@@ -292,8 +292,8 @@ const List<_DeployStep> _enSteps = <_DeployStep>[
     title: 'Prepare a backend machine',
     body: 'Any computer you own works: a home PC, a Mac, or a cloud server. '
         'Install Node.js 18+ and at least one CLI agent (Claude Code, Codex, '
-        'Antigravity, …). Log in on the host, or use Relay later for a '
-        'compatible OAuth agent.',
+        'OpenCode, or Hermes), then complete its login or provider setup on '
+        'that host. Relay does not perform CLI login.',
   ),
   _DeployStep(
     title: 'Download Relay and run the setup script',
@@ -318,8 +318,8 @@ const List<_DeployStep> _enSteps = <_DeployStep>[
   ),
   _DeployStep(
     title: 'Come back here and connect',
-    body: 'Return to this screen and use any one option: scan the QR code, '
-        'upload the QR image, or paste the JSON. Then enter the password you '
+    body: 'Return to this screen. Mobile can scan the QR code; every platform '
+        'can upload its image or paste the JSON. Then enter the password you '
         'chose. Once connected, you can drive the backend agents right from the app.',
   ),
 ];
