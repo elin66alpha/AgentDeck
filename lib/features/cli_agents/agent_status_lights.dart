@@ -15,9 +15,8 @@ String agentUnavailableMessage(AppStrings strings, CliAgent agent) {
   }
 }
 
-/// How long the agent's stored credential still has on the backend host, or
-/// null when it reports no expiry. Relay cannot log the CLI in remotely, so the
-/// message says when a login on that host is due rather than offering an action.
+/// How long a credential with a real deadline still has on the backend host.
+/// Codex managed auth is intentionally absent because its tokens auto-refresh.
 String? agentCredentialExpiryMessage(
   AppStrings strings,
   CliAgent agent, {
@@ -54,10 +53,10 @@ class AgentStatusLights extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final AppStrings strings = context.l10n;
-    // Only OAuth agents (claude/codex) show the second "logged in" light.
-    // hermes/opencode manage their key on the host out of Relay's view, so they
-    // get just the install light and count as usable once installed.
-    final bool showAuthLight = agent.authKind == 'oauth';
+    // Codex can use managed ChatGPT auth or an API key, both of which Relay can
+    // detect. Hermes/OpenCode provider keys remain outside this status contract.
+    final bool showAuthLight = agent.authKind == 'oauth' ||
+        (agent.key == 'codex' && agent.authKind == 'apiKey');
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[

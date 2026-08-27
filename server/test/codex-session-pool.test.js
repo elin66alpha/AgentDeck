@@ -93,6 +93,18 @@ test('a turn is settled by turn/completed, not by the turn/start response', asyn
   await done();
 });
 
+test('account checks share the persistent app-server and can force refresh', async () => {
+  const { pool, state, done } = makePool();
+  const account = await pool.readAccount({ refreshToken: true });
+  assert.equal(account.account.type, 'chatgpt');
+  assert.equal(account.account.email, 'must-not-leave-the-backend@example.invalid');
+  assert.ok(state().includes('account refresh=true'));
+
+  await send(pool, 'a', 'after-account-check');
+  assert.equal(state().filter((line) => line.startsWith('spawn ')).length, 1);
+  await done();
+});
+
 test('a cold start resumes the stored thread id', async () => {
   const { pool, state, done } = makePool();
   const result = await send(pool, 'a', 'one', { resumeId: 'stored-thread' });

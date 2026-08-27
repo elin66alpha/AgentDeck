@@ -283,6 +283,21 @@ const codexPool = createCodexSessionPool({
   },
 });
 
+// A manual credential recheck can arrive from more than one client at once.
+// Managed ChatGPT refresh tokens may rotate, so collapse concurrent forced
+// refreshes onto one app-server request instead of racing them.
+let codexAccountRefresh = null;
+function inspectCodexAccount(options = {}) {
+  const refreshToken = options.refreshToken === true;
+  if (!refreshToken) return codexPool.readAccount({ refreshToken: false });
+  if (codexAccountRefresh) return codexAccountRefresh;
+  const pending = codexPool.readAccount({ refreshToken: true }).finally(() => {
+    if (codexAccountRefresh === pending) codexAccountRefresh = null;
+  });
+  codexAccountRefresh = pending;
+  return pending;
+}
+
 // Agents whose sessions Relay hosts itself, so deleting a chat can request
 // machine-side transcript deletion instead of only forgetting its id.
 const SESSION_POOLS = {
@@ -766,4 +781,5 @@ module.exports = {
   opencodePool,
   hermesPool,
   codexPool,
+  inspectCodexAccount,
 };

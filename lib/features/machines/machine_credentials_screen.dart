@@ -447,7 +447,9 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
     final CliAgentsController? controller = widget.agentsController;
     if (controller == null) return;
     try {
-      final List<CliAgent> agents = await _backendClient.fetchAgents();
+      final List<CliAgent> agents = await _backendClient.fetchAgents(
+        verifyCredentials: true,
+      );
       if (!mounted) return;
       controller.syncAgents(agents);
     } catch (err) {

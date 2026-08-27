@@ -36,21 +36,6 @@ function fileHasText(fsModule, filePath) {
   }
 }
 
-// Expiry claim of a JWT, in epoch milliseconds. The payload is decoded, never
-// verified: only `exp` is read and no token value leaves this module.
-function jwtExpiresAt(token) {
-  const payload = String(token || '').split('.')[1];
-  if (!payload) return null;
-  try {
-    const claims = JSON.parse(
-      Buffer.from(payload, 'base64url').toString('utf8'),
-    );
-    return Number.isFinite(claims.exp) ? claims.exp * 1000 : null;
-  } catch (_err) {
-    return null;
-  }
-}
-
 function expiryOrNull(value) {
   return Number.isFinite(value) && value > 0 ? value : null;
 }
@@ -67,15 +52,84 @@ function claudeCredential(fsModule, homeDir) {
   };
 }
 
-function codexCredential(fsModule, homeDir) {
-  const auth = readJson(fsModule, path.join(homeDir, '.codex', 'auth.json'));
+function normalizedAuthMode(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]/g, '');
+}
+
+function codexCredential(fsModule, homeDir, environment) {
+  const auth = readJson(fsModule, path.join(homeDir, '.codex', 'auth.json')) || {};
   const tokens = (auth && auth.tokens) || {};
+  const mode = normalizedAuthMode(auth.auth_mode);
+  const hasApiKey =
+    nonEmpty(auth.OPENAI_API_KEY) || nonEmpty(environment.OPENAI_API_KEY);
+
+  // `auth_mode` is authoritative when present. Keep a shape-based fallback for
+  // older Codex versions, which wrote the same values without the discriminator.
+  if (mode === 'apikey' || (!mode && hasApiKey)) {
+    return {
+      authed: hasApiKey,
+      authKind: 'apiKey',
+      expiresAt: null,
+    };
+  }
+  if (mode.includes('bedrock')) {
+    return { authed: true, authKind: 'hostManaged', expiresAt: null };
+  }
+  const managedChatGpt = mode === 'chatgpt';
   return {
-    authed: nonEmpty(tokens.access_token),
-    // The id_token carries the session expiry the user actually has to renew by
-    // logging in again; the access token is rotated on its own far more often.
-    expiresAt: jwtExpiresAt(tokens.id_token),
+    authed: managedChatGpt
+      ? nonEmpty(tokens.access_token) && nonEmpty(tokens.refresh_token)
+      : nonEmpty(tokens.access_token),
+    authKind: 'oauth',
+    // Codex rotates its short-lived ID/access tokens automatically. Its opaque
+    // refresh token has no client-readable expiry, so there is no honest login
+    // countdown to report here.
+    expiresAt: null,
   };
+}
+
+// Convert the non-secret part of Codex `account/read` into Relay's status
+// vocabulary. Email, account ids and every credential value are intentionally
+// discarded. `requiresOpenaiAuth` describes the provider, not login state: an
+// account object is what proves configured auth, while false means the active
+// provider can run without OpenAI credentials.
+function codexAccountCredential(result, fallback = {}) {
+  const account = result && typeof result.account === 'object' ? result.account : null;
+  if (!account) {
+    return {
+      ...fallback,
+      authed: result && result.requiresOpenaiAuth === false,
+      authKind:
+        result && result.requiresOpenaiAuth === false
+          ? 'hostManaged'
+          : fallback.authKind || 'oauth',
+      credentialExpiresAt: null,
+    };
+  }
+
+  const type = normalizedAuthMode(account.type);
+  let authKind = 'hostManaged';
+  if (type === 'apikey') authKind = 'apiKey';
+  else if (type === 'chatgpt' || type === 'chatgptauthtokens') authKind = 'oauth';
+
+  return {
+    ...fallback,
+    authed: true,
+    authKind,
+    credentialExpiresAt: null,
+  };
+}
+
+function isCodexReauthError(err) {
+  const text = `${(err && err.message) || ''} ${JSON.stringify(
+    (err && err.data) || '',
+  )}`;
+  return /(?:refresh token.*(?:rejected|expired|invalid|revoked)|invalid_grant|not logged in|re-?authentication required|login required)/i.test(
+    text,
+  );
 }
 
 function hasApiKeyLikeValue(value, keyName = '') {
@@ -117,15 +171,14 @@ function hermesAuthed(fsModule, homeDir) {
   return hasApiKeyLikeValue(auth) || hermesConfigAuthed(fsModule, homeDir);
 }
 
-// Login state plus, for the OAuth agents, when the stored credential runs out.
-// `expiresAt` is null whenever the agent has no such timestamp on disk, which is
-// the case for every host-managed API key.
-function agentCredential(agentKey, installed, fsModule, homeDir) {
+// Login state plus a real stored deadline when one exists. `expiresAt` is null
+// for Codex's rotating managed tokens and every host-managed API key.
+function agentCredential(agentKey, installed, fsModule, homeDir, environment) {
   switch (agentKey) {
     case 'claude':
       return claudeCredential(fsModule, homeDir);
     case 'codex':
-      return codexCredential(fsModule, homeDir);
+      return codexCredential(fsModule, homeDir, environment);
     case 'hermes':
       return { authed: hermesAuthed(fsModule, homeDir), expiresAt: null };
     case 'opencode':
@@ -135,15 +188,21 @@ function agentCredential(agentKey, installed, fsModule, homeDir) {
   }
 }
 
-function buildStatuses({ fsModule, homeDir, commandExistsFn }) {
+function buildStatuses({ fsModule, homeDir, commandExistsFn, environment }) {
   const statuses = {};
   for (const agent of Object.values(AGENTS)) {
     const installed = commandExistsFn(agent.bin || agent.key);
-    const credential = agentCredential(agent.key, installed, fsModule, homeDir);
+    const credential = agentCredential(
+      agent.key,
+      installed,
+      fsModule,
+      homeDir,
+      environment,
+    );
     statuses[agent.key] = {
       installed,
       authed: credential.authed,
-      authKind: AUTH_KIND[agent.key] || 'unknown',
+      authKind: credential.authKind || AUTH_KIND[agent.key] || 'unknown',
       credentialExpiresAt: credential.expiresAt,
     };
   }
@@ -153,17 +212,23 @@ function buildStatuses({ fsModule, homeDir, commandExistsFn }) {
 function getAgentStatuses(options = {}) {
   const fsModule = options.fs || fs;
   const homeDir = options.homeDir || os.homedir();
+  const environment = options.env || process.env;
   const commandExistsFn = options.commandExists || commandExists;
   const now = typeof options.now === 'function' ? options.now() : Date.now();
   const useCache = options.cache !== false;
   const cacheKey = homeDir;
-  if (useCache) {
+  if (useCache && options.refresh !== true) {
     const cached = statusCache.get(cacheKey);
     if (cached && now - cached.at < STATUS_TTL_MS) {
       return cached.value;
     }
   }
-  const value = buildStatuses({ fsModule, homeDir, commandExistsFn });
+  const value = buildStatuses({
+    fsModule,
+    homeDir,
+    commandExistsFn,
+    environment,
+  });
   if (useCache) statusCache.set(cacheKey, { value, at: now });
   return value;
 }
@@ -175,4 +240,6 @@ function clearAgentStatusCache() {
 module.exports = {
   getAgentStatuses,
   clearAgentStatusCache,
+  codexAccountCredential,
+  isCodexReauthError,
 };

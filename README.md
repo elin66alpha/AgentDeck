@@ -89,7 +89,7 @@ can run concurrently without sharing a global backend directory.
 |---|---|---|
 | 💬 | **Live, persistent chat** | Streaming replies, cancellation, named sessions, cross-device history, search, and Markdown export. |
 | 🐝 | **Multi-agent Swarms** | Shared transcripts, per-member roles and controls, parallel waves, bounded `@mention` handoffs, and reusable JSON templates. |
-| 🎛️ | **Agent controls** | Model, reasoning effort, permission tier, install/auth status, credential-expiry countdown, and Fast mode for Claude/Codex. |
+| 🎛️ | **Agent controls** | Model, reasoning effort, permission tier, install/auth status, on-demand Codex credential verification, Claude credential expiry, and Fast mode for Claude/Codex. |
 | 📁 | **Files and terminal** | Allowed-path browsing, uploads, downloads, zipped folders, workdir switching, and one resumable PTY per device credential. |
 | 📊 | **Quota workflows** | Claude/Codex usage views plus one queued prompt for the next detected five-hour reset. |
 | 🔔 | **Notifications** | In-app/browser alerts, with optional Web Push and Android FCM for configured deployments. |

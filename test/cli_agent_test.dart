@@ -96,6 +96,7 @@ void main() {
       'key': 'codex',
       'label': 'Codex',
       'description': 'OpenAI Codex CLI',
+      'credentialExpiresAt': 1893456000000,
     });
 
     expect(
@@ -122,7 +123,7 @@ void main() {
     expect(expiryAfter(const Duration(days: -3, hours: -1)).expired, true);
   });
 
-  test('describes the expiry only for agents that report one', () {
+  test('describes real expiry fields but never Codex token rotation', () {
     const AppStrings strings = AppStrings(AppLanguage.en);
     final DateTime now = DateTime(2026, 8, 16, 12);
     CliAgent claudeExpiring(Duration offset) => CliAgent(
@@ -157,6 +158,20 @@ void main() {
           label: 'OpenCode',
           description: 'OpenCode CLI',
           authKind: 'apiKeyOptional',
+        ),
+        now: now,
+      ),
+      isNull,
+    );
+    expect(
+      agentCredentialExpiryMessage(
+        strings,
+        CliAgent(
+          key: 'codex',
+          label: 'Codex',
+          description: 'OpenAI Codex CLI',
+          authKind: 'oauth',
+          credentialExpiresAt: now.subtract(const Duration(days: 2)),
         ),
         now: now,
       ),

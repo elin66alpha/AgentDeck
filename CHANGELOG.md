@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Codex authentication status now follows its app-server `account/read`
+  contract on an explicit recheck, including managed ChatGPT, API-key, external
+  token, and host-managed provider modes. Relay no longer treats the one-hour
+  ID-token `exp` as a login deadline: managed ChatGPT credentials refresh
+  automatically, and Codex shows no misleading expiry countdown. Transient
+  verification failures also remain errors instead of being reported as a
+  required login.
+
 ## 0.1.5 - 2026-08-19
 
 ### Removed

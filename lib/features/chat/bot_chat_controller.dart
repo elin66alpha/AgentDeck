@@ -166,10 +166,12 @@ class BotChatController extends ChangeNotifier {
 
   /// Refreshes per-agent login state from the backend. Best-effort: a probe
   /// failure (offline, older backend without the endpoint) is ignored.
-  Future<void> refreshAuthStatus() async {
+  Future<void> refreshAuthStatus({bool verifyCredentials = false}) async {
     if (_machine == null) return;
     try {
-      final Map<String, bool?> status = await _backendClient.fetchAuthStatus();
+      final Map<String, bool?> status = await _backendClient.fetchAuthStatus(
+        verifyCredentials: verifyCredentials,
+      );
       _authStatus
         ..clear()
         ..addAll(status);

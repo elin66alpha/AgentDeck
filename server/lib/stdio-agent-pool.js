@@ -102,6 +102,7 @@ function createStdioAgentPool(options = {}) {
   const slotWaiters = [];
   let conn = null;
   let connPromise = null;
+  let connectionIdleTimer = null;
   let shuttingDown = false;
   // Callers between "released a session" and "about to open one" hold the
   // process, so the swap does not look like the pool going idle.
@@ -245,7 +246,11 @@ function createStdioAgentPool(options = {}) {
   function dropConnection(c, err, immediate) {
     if (c.closed) return;
     c.closed = true;
-    if (conn === c) conn = null;
+    if (conn === c) {
+      conn = null;
+      if (connectionIdleTimer) clearTimeout(connectionIdleTimer);
+      connectionIdleTimer = null;
+    }
     for (const pending of c.pending.values()) {
       pending.reject(sessionLostError(agentKey, err));
     }
@@ -324,6 +329,8 @@ function createStdioAgentPool(options = {}) {
   }
 
   function ensureConnection() {
+    if (connectionIdleTimer) clearTimeout(connectionIdleTimer);
+    connectionIdleTimer = null;
     if (conn && !conn.closed) return Promise.resolve(conn);
     if (!connPromise) {
       connPromise = openConnection().then(
@@ -392,6 +399,8 @@ function createStdioAgentPool(options = {}) {
   }
 
   function closeIdleConnection() {
+    if (connectionIdleTimer) clearTimeout(connectionIdleTimer);
+    connectionIdleTimer = null;
     if (!conn || conn.closed) return;
     if (conn.sessions.size > 0 || live.size > 0) return;
     // A caller queued on the cap, or swapping one session for another, is about
@@ -400,6 +409,14 @@ function createStdioAgentPool(options = {}) {
     // avoid.
     if (connPromise || slotWaiters.length || holds > 0) return;
     dropConnection(conn, null, shuttingDown);
+  }
+
+  function scheduleIdleConnectionClose() {
+    if (connectionIdleTimer) clearTimeout(connectionIdleTimer);
+    connectionIdleTimer = setTimeout(closeIdleConnection, idleMs);
+    if (typeof connectionIdleTimer.unref === 'function') {
+      connectionIdleTimer.unref();
+    }
   }
 
   async function closeSession(entry) {
@@ -621,6 +638,28 @@ function createStdioAgentPool(options = {}) {
     }
   }
 
+  // Run a connection-level driver method without opening a conversation. This
+  // is used for protocol-native metadata such as Codex `account/read`. It shares
+  // the same process as turns and keeps an otherwise-empty connection warm for
+  // the normal idle window, so a status check never creates a parallel agent.
+  async function callDriver(method, ...args) {
+    holds += 1;
+    let c = null;
+    try {
+      c = await ensureConnection();
+      const fn = c.driver && c.driver[method];
+      if (typeof fn !== 'function') {
+        throw new Error(`${agentKey} driver does not support ${method}`);
+      }
+      return await fn(...args);
+    } finally {
+      holds -= 1;
+      if (c && !c.closed && c.sessions.size === 0 && live.size === 0) {
+        scheduleIdleConnectionClose();
+      }
+    }
+  }
+
   function runDeleteCommand(sessionId, cwd) {
     const command = resolveDeleteCommand && resolveDeleteCommand(sessionId);
     if (!command) return Promise.resolve(false);
@@ -669,6 +708,8 @@ function createStdioAgentPool(options = {}) {
 
   async function shutdown() {
     shuttingDown = true;
+    if (connectionIdleTimer) clearTimeout(connectionIdleTimer);
+    connectionIdleTimer = null;
     for (const entry of [...live.values()]) dropEntry(entry, null);
     live.clear();
     if (conn) dropConnection(conn, null, true);
@@ -685,7 +726,7 @@ function createStdioAgentPool(options = {}) {
     };
   }
 
-  return { send, forget, shutdown, stats };
+  return { send, callDriver, forget, shutdown, stats };
 }
 
 module.exports = { createStdioAgentPool };

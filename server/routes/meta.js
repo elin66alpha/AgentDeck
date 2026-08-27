@@ -5,7 +5,9 @@ const express = require('express');
 
 const { clearModelDiscoveryCache } = require('../lib/model-discovery');
 const {
+  codexAccountCredential,
   getAgentStatuses: defaultGetAgentStatuses,
+  isCodexReauthError,
 } = require('../lib/agent-status');
 
 module.exports = function createMetaRouter(ctx) {
@@ -22,7 +24,6 @@ module.exports = function createMetaRouter(ctx) {
     WEB_BUILD_DIR,
     activeRequests,
     agentRequiredError,
-    authStatus,
     bearerToken,
     buildDiagnostics,
     describeAgent,
@@ -34,6 +35,7 @@ module.exports = function createMetaRouter(ctx) {
     getAgentStatuses = defaultGetAgentStatuses,
     getDefaultWorkdir,
     getSettings,
+    inspectCodexAccount,
     listAgents,
     listTokenSummaries,
     normalizeDeviceId,
@@ -48,38 +50,84 @@ module.exports = function createMetaRouter(ctx) {
   } = ctx;
   const router = express.Router();
 
+  function verifyCredentialsRequested(req) {
+    const value = String(req.query.verifyCredentials || '').toLowerCase();
+    return value === 'true' || value === '1';
+  }
+
+  async function currentAgentStatuses(verifyCredentials) {
+    const statuses = getAgentStatuses(
+      verifyCredentials ? { refresh: true } : undefined,
+    );
+    const codex = statuses.codex;
+    if (
+      !verifyCredentials ||
+      !codex ||
+      codex.installed !== true ||
+      typeof inspectCodexAccount !== 'function'
+    ) {
+      return statuses;
+    }
+
+    try {
+      const account = await inspectCodexAccount({ refreshToken: true });
+      statuses.codex = codexAccountCredential(account, codex);
+    } catch (err) {
+      if (!isCodexReauthError(err)) throw err;
+      statuses.codex = codexAccountCredential(
+        { account: null, requiresOpenaiAuth: true },
+        codex,
+      );
+    }
+    return statuses;
+  }
+
   router.get('/api/health', (_req, res) => {
     res.json({ ok: true, time: new Date().toISOString() });
   });
 
-  router.get('/api/agents', (_req, res) => {
-    const statuses = getAgentStatuses();
-    res.json({
-      defaultAgent: DEFAULT_AGENT,
-      agents: listAgents().map((agent) => {
-        const status = statuses[agent.key] || {};
-        const installed = status.installed === true;
-        const authed = status.authed === true;
-        return {
-          ...agent,
-          installed,
-          authed,
-          authKind: status.authKind || 'unknown',
-          // Epoch ms at which the stored OAuth credential runs out, so the app
-          // can say how many days are left before a login on the host is due.
-          // null for agents whose credential carries no expiry.
-          credentialExpiresAt: Number.isFinite(status.credentialExpiresAt)
+  function agentPayloads(statuses) {
+    return listAgents().map((agent) => {
+      const status = statuses[agent.key] || {};
+      const installed = status.installed === true;
+      const authed = status.authed === true;
+      return {
+        ...agent,
+        installed,
+        authed,
+        authKind: status.authKind || 'unknown',
+        // Claude stores an access-token expiry. Codex managed auth refreshes its
+        // short-lived tokens and has no client-readable login deadline.
+        credentialExpiresAt:
+          agent.key !== 'codex' && Number.isFinite(status.credentialExpiresAt)
             ? status.credentialExpiresAt
             : null,
-          // claude/codex (oauth) gate on login; hermes/opencode are managed
-          // out-of-band (the user sets up their key on the host), so they are
-          // usable whenever installed and never gate on a key Relay can't see.
-          usable:
-            installed &&
-            (authed || agent.key === 'opencode' || agent.key === 'hermes'),
-        };
-      }),
+        // hermes/opencode remain host-managed and do not gate on a key Relay
+        // cannot reliably validate. Codex is gated on its detected auth mode.
+        usable:
+          installed &&
+          (authed || agent.key === 'opencode' || agent.key === 'hermes'),
+      };
     });
+  }
+
+  function sendCredentialVerificationError(res) {
+    return res.status(503).json({
+      error: 'Codex credential verification failed. Try again.',
+    });
+  }
+
+  router.get('/api/agents', (req, res, next) => {
+    const verifyCredentials = verifyCredentialsRequested(req);
+    currentAgentStatuses(verifyCredentials).then(
+      (statuses) =>
+        res.json({
+          defaultAgent: DEFAULT_AGENT,
+          agents: agentPayloads(statuses),
+        }),
+      (err) =>
+        verifyCredentials ? sendCredentialVerificationError(res) : next(err),
+    );
   });
 
   // Run a CLI binary with fixed argv (no user-controlled tokens) and resolve with
@@ -214,14 +262,22 @@ module.exports = function createMetaRouter(ctx) {
   // Best-effort login state per agent so the app can warn before sending a
   // message. loggedIn is true/false when detectable from on-disk credentials,
   // or null when it cannot be determined without running the CLI.
-  router.get('/api/auth/status', (_req, res) => {
-    res.json({
-      agents: listAgents().map((agent) => ({
-        key: agent.key,
-        label: agent.label,
-        loggedIn: authStatus(agent.key),
-      })),
-    });
+  router.get('/api/auth/status', (req, res, next) => {
+    const verifyCredentials = verifyCredentialsRequested(req);
+    currentAgentStatuses(verifyCredentials).then(
+      (statuses) =>
+        res.json({
+          agents: listAgents().map((agent) => ({
+            key: agent.key,
+            label: agent.label,
+            loggedIn: statuses[agent.key]
+              ? statuses[agent.key].authed === true
+              : null,
+          })),
+        }),
+      (err) =>
+        verifyCredentials ? sendCredentialVerificationError(res) : next(err),
+    );
   });
 
   router.get('/api/tokens', (req, res) => {

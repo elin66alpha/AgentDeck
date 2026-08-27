@@ -1352,8 +1352,13 @@ class BackendClient {
   /// Best-effort login state per agent so the app can warn before sending a
   /// message. Maps agentKey -> loggedIn, where the value is true/false when the
   /// backend can read the CLI's credentials, or null when it cannot tell.
-  Future<Map<String, bool?>> fetchAuthStatus() async {
-    final Object? decoded = await _requestJson('GET', '/api/auth/status');
+  Future<Map<String, bool?>> fetchAuthStatus({
+    bool verifyCredentials = false,
+  }) async {
+    final String path = verifyCredentials
+        ? '/api/auth/status?verifyCredentials=true'
+        : '/api/auth/status';
+    final Object? decoded = await _requestJson('GET', path);
     final Map<String, bool?> result = <String, bool?>{};
     if (decoded is Map && decoded['agents'] is List) {
       for (final Object? item in (decoded['agents'] as List)) {
@@ -1368,8 +1373,11 @@ class BackendClient {
   }
 
   /// The agents the backend host knows about, including install/auth status.
-  Future<List<CliAgent>> fetchAgents() async {
-    final Object? decoded = await _requestJson('GET', '/api/agents');
+  Future<List<CliAgent>> fetchAgents({bool verifyCredentials = false}) async {
+    final String path = verifyCredentials
+        ? '/api/agents?verifyCredentials=true'
+        : '/api/agents';
+    final Object? decoded = await _requestJson('GET', path);
     if (decoded is! Map) {
       throw BackendException('Invalid agents response.');
     }

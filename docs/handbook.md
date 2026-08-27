@@ -94,17 +94,24 @@ Hermes are experimental. Every agent's credential or provider configuration is
 created on the backend host with that CLI's own flow. Relay never logs a CLI in
 remotely.
 
-For the two OAuth agents it also reads the expiry stored beside those
-credentials — `claudeAiOauth.expiresAt` in `~/.claude/.credentials.json`, and
-the `exp` claim of the `id_token` in `~/.codex/auth.json` — and reports it as
-`credentialExpiresAt` (epoch ms) on `/api/agents`. The app turns that into the
-days left, or the days since expiry, on the **Manage credentials** screen. Only
-the status/expiry result is returned by this endpoint. Separately,
-`server/lib/usage.js` reads the Claude/Codex OAuth tokens for quota reporting
-and can refresh an expired access token atomically in the CLI's credential
-file. Token values are sent only to the provider's OAuth/API endpoints and
-never returned by Relay's API. Agents whose credential carries no expiry report
-`null` and show no countdown.
+Claude's `claudeAiOauth.expiresAt` in `~/.claude/.credentials.json` is reported
+as `credentialExpiresAt` (epoch ms) on `/api/agents`, and the app turns it into
+the days left or the days since expiry on **Manage credentials**. Codex is
+different: managed ChatGPT auth automatically rotates its short-lived ID and
+access tokens, while the refresh token has no client-readable deadline. Relay
+therefore always reports a null Codex `credentialExpiresAt` and shows no login
+countdown for it.
+
+Stored Codex state distinguishes managed ChatGPT, API-key, external-token, and
+host-managed provider modes. An explicit **Recheck** calls `account/read` with
+`refreshToken: true` on Relay's shared Codex app-server; a missing account or a
+rejected refresh marks Codex as requiring authentication, while a transient
+probe failure is reported as a check error and leaves the app's displayed state
+in place.
+Only normalized auth/status fields leave the backend: account identity and
+credential values are discarded. Separately, `server/lib/usage.js` reads the
+Claude/Codex OAuth tokens for quota reporting and can refresh an expired access
+token atomically in the CLI's credential file.
 
 ## SSH terminal
 

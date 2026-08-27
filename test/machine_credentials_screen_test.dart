@@ -109,7 +109,7 @@ void main() {
         tester.widget<TerminalView>(find.byType(TerminalView)).terminal;
     expect(identical(firstTerminal, secondTerminal), isTrue);
   });
-  testWidgets('agent credentials report expiry instead of a login action', (
+  testWidgets('agent credentials report only real login deadlines', (
     WidgetTester tester,
   ) async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
@@ -165,10 +165,8 @@ void main() {
     );
 
     expect(find.text('Log in again in 12 days'), findsOneWidget);
-    expect(
-      find.text('Expired 2 days ago. Log in again on the backend host.'),
-      findsOneWidget,
-    );
+    expect(find.text('Ready'), findsOneWidget);
+    expect(find.textContaining('Expired 2 days ago'), findsNothing);
     expect(find.widgetWithText(FilledButton, 'Log in'), findsNothing);
     expect(find.widgetWithText(FilledButton, 'Log in again'), findsNothing);
   });

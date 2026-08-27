@@ -471,7 +471,10 @@ class _BotChatScreenState extends State<BotChatScreen>
                       }
                       return _NotLoggedInBanner(
                         agentLabel: agent.label,
-                        onRecheck: widget.chatController.refreshAuthStatus,
+                        onRecheck: () =>
+                            widget.chatController.refreshAuthStatus(
+                          verifyCredentials: true,
+                        ),
                       );
                     },
                   ),
