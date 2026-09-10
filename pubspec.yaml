@@ -2,7 +2,7 @@ name: relay
 description: "A private Flutter control surface for local CLI coding agents."
 publish_to: "none"
 
-version: 0.1.6+16
+version: 0.1.7+17
 
 environment:
   sdk: ">=3.4.0 <4.0.0"

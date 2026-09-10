@@ -5,7 +5,7 @@ import '../../core/settings/app_settings_controller.dart';
 import 'getting_started_screen.dart';
 
 // Shown on the settings screen; keep in step with pubspec.yaml on every release.
-const String _applicationVersion = '0.1.6';
+const String _applicationVersion = '0.1.7';
 const int _fontScaleDivisions = 9;
 
 class AppSettingsScreen extends StatelessWidget {

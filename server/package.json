@@ -1,6 +1,6 @@
 {
   "name": "relay-server",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Local HTTP backend for the Relay Flutter client.",
   "private": true,
   "main": "server.js",
