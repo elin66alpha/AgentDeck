@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.6 - 2026-09-10
 
 ### Added
 
@@ -9,6 +9,11 @@
   typed or tapped, then release, so Ctrl then `c` sends `^C`.
 
 ### Changed
+
+- Remove the white exterior corners from the Relay icon and refresh Android,
+  iOS, macOS, Web, and Windows icon assets.
+- Expand the Chinese and English in-app getting-started and deployment guides
+  with workspace, machine details, sessions, controls, and terminal workflows.
 
 - A brand-new device now starts in `~/Relay` instead of `~/agent_deck`;
   `RELAY_DEFAULT_DIR` still overrides it.
@@ -28,6 +33,8 @@
   back Claude.
 
 ### Fixed
+
+- Make workdir path assertions portable to Windows as well as Unix hosts.
 
 - Codex authentication status now follows its app-server `account/read`
   contract on an explicit recheck, including managed ChatGPT, API-key, external

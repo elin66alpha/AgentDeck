@@ -131,6 +131,11 @@ device.
 ### 3. Pick a project and start working
 
 Choose the backend, set the workdir, and open an agent conversation or Swarm.
+Home shows the current machine, current workspace, and up to three recent
+workspaces. Tap the machine for CLI status checks, device tokens, and Enter SSH.
+Use File system → Set as work path to select the project before sending a task.
+Home → Tutorial includes a detailed guide to sessions, controls, Swarms, files,
+and the mobile terminal key bar.
 For service commands, networking details, and platform notes, continue with the
 [backend guide](backends/README.md).
 

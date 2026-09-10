@@ -369,6 +369,17 @@ this repository still reuse debug signing.
 
 ## Configuration
 
+### Refreshing application icons
+
+`assets/icon.png` is the transparent master. After replacing it, run
+`dart run scripts/generate_icons.dart` from the repository root to export the
+Android, iOS, macOS, Web, and Windows assets. The Windows ICO includes 16, 24,
+32, 48, 64, 128, and 256 pixel images. iOS and maskable Web exports use an opaque
+navy background; other exports retain the master's transparency. Rebuild each
+client to embed its new assets.
+
+### Backend settings
+
 `server/.env.example` documents supported deployment settings. The most useful
 groups are:
 
