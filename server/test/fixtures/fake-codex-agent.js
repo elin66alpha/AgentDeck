@@ -9,6 +9,7 @@ const fs = require('fs');
 
 const statePath = process.env.FAKE_CODEX_STATE || '';
 const noResume = process.env.FAKE_CODEX_NO_RESUME === '1';
+const accountType = process.env.FAKE_CODEX_ACCOUNT_TYPE || 'chatgpt';
 
 function record(line) {
   if (!statePath) return;
@@ -147,6 +148,23 @@ function handle(msg) {
   switch (msg.method) {
     case 'initialize':
       reply({ userAgent: 'fake-codex/0' });
+      return;
+    case 'account/read':
+      record(`account refresh=${params.refreshToken === true}`);
+      if (process.env.FAKE_CODEX_AUTH_REJECTED === '1') {
+        fail('OAuth refresh token was rejected: refresh_token_expired');
+        return;
+      }
+      reply({
+        account:
+          accountType === 'none'
+            ? null
+            : {
+                type: accountType,
+                email: 'must-not-leave-the-backend@example.invalid',
+              },
+        requiresOpenaiAuth: accountType !== 'none',
+      });
       return;
     case 'thread/start': {
       counter += 1;

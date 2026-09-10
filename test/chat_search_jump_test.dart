@@ -257,12 +257,15 @@ class _SearchBackendClient extends BackendClient {
   }
 
   @override
-  Future<Map<String, bool?>> fetchAuthStatus() async {
+  Future<Map<String, bool?>> fetchAuthStatus({
+    bool verifyCredentials = false,
+  }) async {
     return const <String, bool?>{};
   }
 
   @override
-  Future<List<CliAgent>> fetchAgents() async => defaultCliAgents;
+  Future<List<CliAgent>> fetchAgents({bool verifyCredentials = false}) async =>
+      defaultCliAgents;
 
   // A stream that stays open: an empty one completes at once and the controller
   // then schedules a reconnect timer that outlives the test.

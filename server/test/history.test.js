@@ -19,7 +19,18 @@ const {
   finalizeAllStaleStreamingHistory,
   clearHistory,
   flushHistory,
+  recentWorkdirs,
 } = require('../lib/history');
+
+test('recentWorkdirs lists each workdir once, latest message first', () => {
+  const message = (id, createdAt) => ({ id, role: 'user', content: id, createdAt });
+  upsertHistoryMessage('/tmp/recent-old\u0000claude', message('a', '2099-01-01T00:00:00.000Z'));
+  upsertHistoryMessage('/tmp/recent-new\u0000codex\u0000s1', message('b', '2099-02-01T00:00:00.000Z'));
+  upsertHistoryMessage('/tmp/recent-old\u0000codex', message('c', '2098-01-01T00:00:00.000Z'));
+
+  assert.deepEqual(recentWorkdirs().slice(0, 2), ['/tmp/recent-new', '/tmp/recent-old']);
+  assert.deepEqual(recentWorkdirs(1), ['/tmp/recent-new']);
+});
 
 after(() => {
   try {

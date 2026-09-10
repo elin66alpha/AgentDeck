@@ -26,7 +26,10 @@ class CliAgent {
       usable: json['usable'] as bool? ??
           (installed && (authed || key == 'opencode' || key == 'hermes')),
       authKind: json['authKind'] as String? ?? defaultAuthKindForAgent(key),
-      credentialExpiresAt: expiresAt is num
+      // Older Relay backends exposed Codex's short-lived ID-token expiry as a
+      // login deadline. Managed Codex auth refreshes it automatically, so never
+      // surface that stale field even during a rolling client/server upgrade.
+      credentialExpiresAt: key != 'codex' && expiresAt is num
           ? DateTime.fromMillisecondsSinceEpoch(expiresAt.toInt())
           : null,
     );
@@ -40,10 +43,8 @@ class CliAgent {
   final bool usable;
   final String authKind;
 
-  /// When the OAuth credential stored on the backend host runs out, so the app
-  /// can say how long is left before logging in there again. Null for agents
-  /// whose credential carries no expiry (an older backend, or a host-managed
-  /// API key).
+  /// When a credential with a real, client-readable deadline runs out. Codex
+  /// managed auth is always null because its short-lived tokens auto-refresh.
   final DateTime? credentialExpiresAt;
 
   bool get selectable => usable;
@@ -110,8 +111,9 @@ class CredentialExpiry {
 }
 
 /// Expiry state of [agent]'s credential, or null when it has none to report.
-/// Only the OAuth agents (Claude Code, Codex) ever do.
+/// Codex token expiry is never a login deadline and is ignored defensively.
 CredentialExpiry? cliAgentCredentialExpiry(CliAgent agent, {DateTime? now}) {
+  if (agent.key == 'codex') return null;
   final DateTime? expiresAt = agent.credentialExpiresAt;
   if (expiresAt == null) return null;
   return CredentialExpiry.at(expiresAt, now: now);

@@ -19,12 +19,19 @@ class QuotaUsageScreen extends StatefulWidget {
   State<QuotaUsageScreen> createState() => _QuotaUsageScreenState();
 }
 
+// The quota sources the backend reports, in display order, with the label shown
+// until each one's first report arrives.
+const Map<String, String> _usageSources = <String, String>{
+  'claude': 'Claude Code',
+  'codex': 'Codex',
+};
+
 class _QuotaUsageScreenState extends State<QuotaUsageScreen> {
   // Seeded from the last report the app fetched, so reopening the screen shows
-  // the previous numbers at once. The refresh below then replaces them; a query
-  // that reaches Anthropic and OpenAI is too slow to hold an empty screen for.
+  // the previous numbers at once. Each source is then refreshed on its own and
+  // lands as soon as it answers: Codex's probe can take seconds, Claude's not.
   UsageReport? _report;
-  String? _error;
+  final Map<String, String> _errors = <String, String>{};
   bool _loading = false;
 
   @override
@@ -38,28 +45,35 @@ class _QuotaUsageScreenState extends State<QuotaUsageScreen> {
     if (_loading) return;
     setState(() {
       _loading = true;
-      _error = null;
+      _errors.clear();
     });
+    await Future.wait(_usageSources.keys.map(_refreshSource));
+    if (mounted) setState(() => _loading = false);
+  }
+
+  Future<void> _refreshSource(String source) async {
     try {
-      final UsageReport report = await widget.chatController.usageReport();
+      final UsageReport report =
+          await widget.chatController.usageReport(source: source);
       if (!mounted) return;
-      setState(() {
-        _report = report;
-        _loading = false;
-      });
+      setState(() => _report = report);
     } catch (err) {
       if (!mounted) return;
-      setState(() {
-        _error = err.toString();
-        _loading = false;
-      });
+      setState(() => _errors[source] = err.toString());
       // With numbers already on screen the failure would otherwise be silent.
-      if (_report != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_error!)),
-        );
+      if (_agent(source) != null) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(content: Text(err.toString())));
       }
     }
+  }
+
+  UsageAgent? _agent(String source) {
+    for (final UsageAgent agent in _report?.agents ?? const <UsageAgent>[]) {
+      if (agent.key == source) return agent;
+    }
+    return null;
   }
 
   @override
@@ -86,43 +100,24 @@ class _QuotaUsageScreenState extends State<QuotaUsageScreen> {
   }
 
   Widget _buildBody(BuildContext context) {
-    final UsageReport? report = _report;
-    if (report == null) {
-      if (_error != null) {
-        return Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Text(
-              _error!,
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-          ),
-        );
-      }
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            const CircularProgressIndicator(),
-            const SizedBox(height: 12),
-            Text(context.l10n.loadingUsage),
-          ],
-        ),
-      );
-    }
+    final List<String> sources = _usageSources.keys.toList(growable: false);
     return RefreshIndicator(
       onRefresh: _refresh,
       child: ListView.separated(
         padding: const EdgeInsets.all(16),
-        itemCount: report.agents.length,
+        itemCount: sources.length,
         separatorBuilder: (_, __) => const SizedBox(height: 12),
         itemBuilder: (BuildContext context, int index) {
+          final String source = sources[index];
           return Align(
             alignment: Alignment.topCenter,
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 760),
-              child: _UsageAgentPanel(agent: report.agents[index]),
+              child: _UsageAgentPanel(
+                label: _usageSources[source]!,
+                agent: _agent(source),
+                error: _errors[source],
+              ),
             ),
           );
         },
@@ -132,13 +127,19 @@ class _QuotaUsageScreenState extends State<QuotaUsageScreen> {
 }
 
 class _UsageAgentPanel extends StatelessWidget {
-  const _UsageAgentPanel({required this.agent});
+  const _UsageAgentPanel({required this.label, this.agent, this.error});
 
-  final UsageAgent agent;
+  final String label;
+  // Null until the source's first report arrives.
+  final UsageAgent? agent;
+  // Only drawn while [agent] is null; with numbers on screen a failed refresh
+  // is reported by a snackbar instead.
+  final String? error;
 
   @override
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
+    final UsageAgent? agent = this.agent;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -154,7 +155,7 @@ class _UsageAgentPanel extends StatelessWidget {
               Expanded(
                 flex: 2,
                 child: Text(
-                  agent.label,
+                  agent?.label ?? label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   softWrap: false,
@@ -164,7 +165,7 @@ class _UsageAgentPanel extends StatelessWidget {
                   ),
                 ),
               ),
-              if (agent.detail.isNotEmpty) ...<Widget>[
+              if (agent != null && agent.detail.isNotEmpty) ...<Widget>[
                 const SizedBox(width: 8),
                 Flexible(
                   child: Text(
@@ -179,7 +180,7 @@ class _UsageAgentPanel extends StatelessWidget {
               ],
             ],
           ),
-          if (agent.asOf != null || agent.stale) ...<Widget>[
+          if (agent != null && (agent.asOf != null || agent.stale)) ...<Widget>[
             const SizedBox(height: 8),
             Wrap(
               spacing: 8,
@@ -214,7 +215,14 @@ class _UsageAgentPanel extends StatelessWidget {
             ),
           ],
           const SizedBox(height: 12),
-          if (!agent.available)
+          if (agent == null)
+            Text(
+              error ?? context.l10n.loadingUsage,
+              style: TextStyle(
+                color: error == null ? colors.outline : colors.error,
+              ),
+            )
+          else if (!agent.available)
             Text(
               context.l10n.unavailable,
               style: TextStyle(color: colors.outline),

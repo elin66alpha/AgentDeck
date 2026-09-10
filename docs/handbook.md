@@ -82,8 +82,9 @@ and pasted JSON. Native clients use platform secure storage. The Web client is
 subject to browser-origin storage security, so use a private profile on a
 trusted device.
 
-Generate a different credential for each device. The backend status panel lists
-their token ids, device metadata, and last-use time. Revoke a token before
+Generate a different credential for each device. **Machine details** (tap the
+machine in the drawer or on the home page) lists their token ids, device
+metadata, and last-use time. Revoke a token before
 deleting its record; revocation also closes the terminal owned by that token.
 Generating another credential removes old export files but does not revoke
 tokens that were already issued.
@@ -94,21 +95,28 @@ Hermes are experimental. Every agent's credential or provider configuration is
 created on the backend host with that CLI's own flow. Relay never logs a CLI in
 remotely.
 
-For the two OAuth agents it also reads the expiry stored beside those
-credentials — `claudeAiOauth.expiresAt` in `~/.claude/.credentials.json`, and
-the `exp` claim of the `id_token` in `~/.codex/auth.json` — and reports it as
-`credentialExpiresAt` (epoch ms) on `/api/agents`. The app turns that into the
-days left, or the days since expiry, on the **Manage credentials** screen. Only
-the status/expiry result is returned by this endpoint. Separately,
-`server/lib/usage.js` reads the Claude/Codex OAuth tokens for quota reporting
-and can refresh an expired access token atomically in the CLI's credential
-file. Token values are sent only to the provider's OAuth/API endpoints and
-never returned by Relay's API. Agents whose credential carries no expiry report
-`null` and show no countdown.
+Claude's `claudeAiOauth.expiresAt` in `~/.claude/.credentials.json` is reported
+as `credentialExpiresAt` (epoch ms) on `/api/agents`, and the app turns it into
+the days left or the days since expiry on **Machine details**. Codex is
+different: managed ChatGPT auth automatically rotates its short-lived ID and
+access tokens, while the refresh token has no client-readable deadline. Relay
+therefore always reports a null Codex `credentialExpiresAt` and shows no login
+countdown for it.
+
+Stored Codex state distinguishes managed ChatGPT, API-key, external-token, and
+host-managed provider modes. An explicit **Recheck** calls `account/read` with
+`refreshToken: true` on Relay's shared Codex app-server; a missing account or a
+rejected refresh marks Codex as requiring authentication, while a transient
+probe failure is reported as a check error and leaves the app's displayed state
+in place.
+Only normalized auth/status fields leave the backend: account identity and
+credential values are discarded. Separately, `server/lib/usage.js` reads the
+Claude/Codex OAuth tokens for quota reporting and can refresh an expired access
+token atomically in the CLI's credential file.
 
 ## SSH terminal
 
-**Manage credentials → Enter SSH** opens an interactive PTY on the backend. It
+**Machine details → Enter SSH** opens an interactive PTY on the backend. It
 uses the backend service account's login shell, starts in that account's home
 directory, and is presented by the same Flutter terminal emulator on mobile,
 Web, and desktop. The colors follow Relay's current Light/Dark theme. Terminal
@@ -118,10 +126,17 @@ primary font: xterm measures its character grid before painting, and Chromium
 can otherwise measure a proportional fallback and produce excessively wide
 horizontal cells.
 
+On Android and iOS a key bar below the terminal adds the keys a phone keyboard
+lacks: Ctrl, Shift, Esc, Tab, and the four arrows. Ctrl and Shift latch: a lit
+modifier applies to the next key, typed on the soft keyboard or tapped on the
+bar, and then releases, so Ctrl then `c` sends `^C`; tapping it again cancels.
+Esc, Tab, and the arrows send at once. Combinations such as Shift+Tab or
+Ctrl+Left are encoded by xterm's keytab, exactly as from a hardware keyboard.
+
 An authenticated `POST /api/terminal/ticket` returns a random, single-use ticket
 valid for 30 seconds. The client redeems it at `/api/terminal/connect`; the
 long-lived bearer credential is not sent in the WebSocket URL. One token record
-maps to one PTY. Returning to Manage credentials leaves that PTY alive, and the
+maps to one PTY. Returning to Machine details leaves that PTY alive, and the
 next Enter SSH reconnects to it; opening it elsewhere replaces the old socket
 instead of creating another shell.
 Revoking the device token closes the socket and PTY. Revocations made by the
@@ -251,7 +266,9 @@ machine-specific workdir, id, and transcript.
 
 ### Quota and notifications
 
-The usage screen reports Claude Code and Codex. Reset detection and
+The usage screen reports Claude Code and Codex. It queries each source on its
+own (`GET /api/usage?source=claude|codex`; an unknown source is a 400), so one
+card fills in as soon as its source answers. Reset detection and
 scheduled messages support Claude Code and Codex only. A schedule stores one
 prompt per source and workspace for the next detected five-hour reset.
 
@@ -285,10 +302,11 @@ WebSocket upgrade requires the short-lived ticket created by its HTTP endpoint.
   options/settings/version/update, diagnostics, device tokens, and shared events.
 - Chat: chat, cancellation, history, history search/export, and clear session.
 - Named sessions: list/create, set active, and delete.
-- Files/workdir: current workdir, absolute directory browse, upload, and
-  download.
+- Files/workdir: current workdir, recent workdirs with chat history, absolute
+  directory browse, upload, and download.
 - Swarms: list/create, update members, delete, history, clear, chat, and cancel.
-- Quota: usage, schedules, schedule replacement, and cancellation.
+- Quota: usage (all sources or one), schedules, schedule replacement, and
+  cancellation.
 - Push: browser subscription/config and FCM device registration.
 - SSH terminal: authenticated ticket creation plus the WebSocket PTY transport.
 
@@ -351,6 +369,17 @@ this repository still reuse debug signing.
 
 ## Configuration
 
+### Refreshing application icons
+
+`assets/icon.png` is the transparent master. After replacing it, run
+`dart run scripts/generate_icons.dart` from the repository root to export the
+Android, iOS, macOS, Web, and Windows assets. The Windows ICO includes 16, 24,
+32, 48, 64, 128, and 256 pixel images. iOS and maskable Web exports use an opaque
+navy background; other exports retain the master's transparency. Rebuild each
+client to embed its new assets.
+
+### Backend settings
+
 `server/.env.example` documents supported deployment settings. The most useful
 groups are:
 
@@ -365,5 +394,5 @@ groups are:
 - usage: quota watch, poll interval, HTTP/probe timeouts and backoff;
 - offline push: VAPID keys and `FCM_SERVICE_ACCOUNT_FILE`.
 
-The default workdir for a new device remains `~/agent_deck` for compatibility;
+The default workdir for a new device is `~/Relay`;
 after first use, each device persists its own selection.

@@ -656,10 +656,18 @@ async function buildAgentUsage({ key, label, fetch, normalize, unavailable }) {
   }
 }
 
-async function buildUsageReport() {
+// `source` limits the report to one agent so the app can query each separately
+// and show whichever answers first instead of waiting for the slowest.
+async function buildUsageReport({ source } = {}) {
+  const sources = source
+    ? USAGE_SOURCES.filter((item) => item.key === source)
+    : USAGE_SOURCES;
+  if (sources.length === 0) {
+    throw new UsageQueryError(`Unknown usage source: ${source}`, 400);
+  }
   // The fetched sources are independent network round-trips; run them together so
   // the dialog waits for the slower one, not the sum of all of them.
-  const agents = await Promise.all(USAGE_SOURCES.map(buildAgentUsage));
+  const agents = await Promise.all(sources.map(buildAgentUsage));
 
   return {
     createdAt: new Date().toISOString(),

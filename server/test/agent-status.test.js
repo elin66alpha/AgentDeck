@@ -8,7 +8,9 @@ const path = require('node:path');
 
 const {
   clearAgentStatusCache,
+  codexAccountCredential,
   getAgentStatuses,
+  isCodexReauthError,
 } = require('../lib/agent-status');
 
 const scratchDirs = [];
@@ -44,14 +46,6 @@ after(() => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
-
-// A JWT with only the `exp` claim, which is all the status reader decodes.
-function jwt(expSeconds) {
-  const payload = Buffer.from(JSON.stringify({ exp: expSeconds })).toString(
-    'base64url',
-  );
-  return `header.${payload}.signature`;
-}
 
 test('detects installed CLI agents and credential files without exposing values', () => {
   const home = makeHome();
@@ -100,7 +94,7 @@ test('detects installed CLI agents and credential files without exposing values'
   });
 });
 
-test('reports the OAuth credential expiry for claude and codex', () => {
+test('reports Claude expiry but never Codex token rotation as login expiry', () => {
   const home = makeHome();
   writeJson(path.join(home, '.claude', '.credentials.json'), {
     claudeAiOauth: {
@@ -110,13 +104,19 @@ test('reports the OAuth credential expiry for claude and codex', () => {
     },
   });
   writeJson(path.join(home, '.codex', 'auth.json'), {
-    tokens: { access_token: 'codex-token', id_token: jwt(1893456789) },
+    auth_mode: 'chatgpt',
+    tokens: {
+      access_token: 'codex-token',
+      refresh_token: 'refresh-token',
+      id_token: 'header.short-lived.signature',
+    },
   });
 
   const result = statuses(home, new Set(['claude', 'codex']));
 
   assert.equal(result.claude.credentialExpiresAt, 1893456000000);
-  assert.equal(result.codex.credentialExpiresAt, 1893456789000);
+  assert.equal(result.codex.authed, true);
+  assert.equal(result.codex.credentialExpiresAt, null);
 });
 
 test('reports a null expiry when the credential carries no usable timestamp', () => {
@@ -163,6 +163,91 @@ test('requires the expected credential shape for each agent', () => {
   assert.equal(result.opencode.authed, true);
 });
 
+test('detects Codex API-key and externally managed token modes', () => {
+  const apiKeyHome = makeHome();
+  writeJson(path.join(apiKeyHome, '.codex', 'auth.json'), {
+    auth_mode: 'apikey',
+    OPENAI_API_KEY: 'sk-test',
+  });
+  const apiKey = statuses(apiKeyHome, new Set(['codex']));
+  assert.equal(apiKey.codex.authed, true);
+  assert.equal(apiKey.codex.authKind, 'apiKey');
+  assert.equal(apiKey.codex.credentialExpiresAt, null);
+
+  const externalHome = makeHome();
+  writeJson(path.join(externalHome, '.codex', 'auth.json'), {
+    auth_mode: 'chatgptAuthTokens',
+    tokens: { access_token: 'host-managed-token' },
+  });
+  const external = statuses(externalHome, new Set(['codex']));
+  assert.equal(external.codex.authed, true);
+  assert.equal(external.codex.authKind, 'oauth');
+
+  const envHome = makeHome();
+  const fromEnvironment = statuses(envHome, new Set(['codex']), {
+    env: { OPENAI_API_KEY: 'sk-from-env' },
+  });
+  assert.equal(fromEnvironment.codex.authed, true);
+  assert.equal(fromEnvironment.codex.authKind, 'apiKey');
+});
+
+test('maps Codex account/read without exposing account details', () => {
+  const fallback = {
+    installed: true,
+    authed: false,
+    authKind: 'oauth',
+    credentialExpiresAt: 123,
+  };
+  assert.deepEqual(
+    codexAccountCredential(
+      {
+        account: {
+          type: 'apiKey',
+          email: 'secret@example.invalid',
+          accountId: 'secret-account',
+        },
+        requiresOpenaiAuth: true,
+      },
+      fallback,
+    ),
+    {
+      installed: true,
+      authed: true,
+      authKind: 'apiKey',
+      credentialExpiresAt: null,
+    },
+  );
+  assert.equal(
+    codexAccountCredential(
+      { account: null, requiresOpenaiAuth: true },
+      fallback,
+    ).authed,
+    false,
+  );
+  assert.deepEqual(
+    codexAccountCredential(
+      { account: null, requiresOpenaiAuth: false },
+      fallback,
+    ),
+    {
+      installed: true,
+      authed: true,
+      authKind: 'hostManaged',
+      credentialExpiresAt: null,
+    },
+  );
+});
+
+test('distinguishes rejected refresh credentials from transient probe errors', () => {
+  assert.equal(
+    isCodexReauthError(
+      new Error('OAuth refresh token was rejected: refresh_token_expired'),
+    ),
+    true,
+  );
+  assert.equal(isCodexReauthError(new Error('connect ETIMEDOUT')), false);
+});
+
 test('detects hermes provider and API key in config yaml', () => {
   const home = makeHome();
   writeText(
@@ -193,6 +278,17 @@ test('caches status detection briefly', () => {
     commandExists,
     now: () => 2000,
   });
+  const refreshed = getAgentStatuses({
+    homeDir: home,
+    commandExists,
+    now: () => 3000,
+    refresh: true,
+  });
+  const refreshedCache = getAgentStatuses({
+    homeDir: home,
+    commandExists,
+    now: () => 4000,
+  });
   const expired = getAgentStatuses({
     homeDir: home,
     commandExists,
@@ -201,5 +297,7 @@ test('caches status detection briefly', () => {
 
   assert.equal(first.claude.installed, true);
   assert.equal(cached.claude.installed, true);
+  assert.equal(refreshed.claude.installed, false);
+  assert.equal(refreshedCache.claude.installed, false);
   assert.equal(expired.claude.installed, false);
 });

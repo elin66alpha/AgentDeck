@@ -35,10 +35,14 @@ class SshTerminalController extends ChangeNotifier {
   bool _wantsConnection = false;
   bool _hasConnected = false;
   int _generation = 0;
+  bool _ctrlLatched = false;
+  bool _shiftLatched = false;
 
   SshTerminalStatus get status => _status;
   String? get error => _error;
   bool get connected => _status == SshTerminalStatus.connected;
+  bool get ctrlLatched => _ctrlLatched;
+  bool get shiftLatched => _shiftLatched;
 
   Future<void> connect(String machineId) async {
     final String cleanMachineId = machineId.trim();
@@ -63,12 +67,30 @@ class SshTerminalController extends ChangeNotifier {
     await _openSocket(++_generation);
   }
 
+  void toggleCtrl() {
+    _ctrlLatched = !_ctrlLatched;
+    notifyListeners();
+  }
+
+  void toggleShift() {
+    _shiftLatched = !_shiftLatched;
+    notifyListeners();
+  }
+
+  /// Sends a key from the mobile key bar with the latched modifiers.
+  void sendKey(TerminalKey key) {
+    final bool ctrl = _ctrlLatched;
+    final bool shift = _shiftLatched;
+    _releaseModifiers();
+    terminal.keyInput(key, ctrl: ctrl, shift: shift);
+  }
+
   Terminal _newTerminal() {
     return Terminal(
       maxLines: 10000,
       onOutput: (String data) => _send(<String, Object?>{
         'type': 'input',
-        'data': data,
+        'data': _applyModifiers(data),
       }),
       onResize: (int width, int height, int pixelWidth, int pixelHeight) {
         _send(<String, Object?>{
@@ -191,6 +213,29 @@ class SshTerminalController extends ChangeNotifier {
         unawaited(_openSocket(++_generation));
       }
     });
+  }
+
+  /// Soft keyboards can't hold Ctrl/Shift, so the latched modifiers apply to
+  /// the next typed character (e.g. Ctrl then c sends ^C) and then release.
+  String _applyModifiers(String data) {
+    if ((!_ctrlLatched && !_shiftLatched) || data.length != 1) return data;
+    String result = _shiftLatched ? data.toUpperCase() : data;
+    if (_ctrlLatched) {
+      // @, A-Z, [, \, ], ^ and _ map to the control codes 0x00-0x1F.
+      final int code = result.toUpperCase().codeUnitAt(0);
+      if (code >= 0x40 && code <= 0x5F) {
+        result = String.fromCharCode(code - 0x40);
+      }
+    }
+    _releaseModifiers();
+    return result;
+  }
+
+  void _releaseModifiers() {
+    if (!_ctrlLatched && !_shiftLatched) return;
+    _ctrlLatched = false;
+    _shiftLatched = false;
+    notifyListeners();
   }
 
   void _send(Map<String, Object?> message) {

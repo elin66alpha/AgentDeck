@@ -166,10 +166,12 @@ class BotChatController extends ChangeNotifier {
 
   /// Refreshes per-agent login state from the backend. Best-effort: a probe
   /// failure (offline, older backend without the endpoint) is ignored.
-  Future<void> refreshAuthStatus() async {
+  Future<void> refreshAuthStatus({bool verifyCredentials = false}) async {
     if (_machine == null) return;
     try {
-      final Map<String, bool?> status = await _backendClient.fetchAuthStatus();
+      final Map<String, bool?> status = await _backendClient.fetchAuthStatus(
+        verifyCredentials: verifyCredentials,
+      );
       _authStatus
         ..clear()
         ..addAll(status);
@@ -348,6 +350,7 @@ class BotChatController extends ChangeNotifier {
       // Another host can have different CLIs, versions, and quota.
       clearAgentOptionsCache();
       _lastUsageReport = null;
+      unawaited(refreshWorkdir());
     }
     if (sameContext && activeSessionId != null) {
       notifyListeners();
@@ -537,10 +540,14 @@ class BotChatController extends ChangeNotifier {
   /// since quota belongs to the host's credentials.
   UsageReport? get lastUsageReport => _lastUsageReport;
 
-  Future<UsageReport> usageReport() async {
-    final UsageReport report = await _backendClient.usageReport();
-    _lastUsageReport = report;
-    return report;
+  /// Queries every quota source, or only [source]. A single-source result is
+  /// merged into [lastUsageReport] and the merged report returned, so sources
+  /// queried separately can land one at a time.
+  Future<UsageReport> usageReport({String? source}) async {
+    final UsageReport report = await _backendClient.usageReport(source: source);
+    final UsageReport? last = _lastUsageReport;
+    return _lastUsageReport =
+        source == null || last == null ? report : last.merge(report);
   }
 
   // Registers this browser for Web Push so quota/scheduled-message alerts arrive
@@ -644,6 +651,19 @@ class BotChatController extends ChangeNotifier {
       _backendClient.cancelQuotaSchedule(id);
 
   Future<WorkdirInfo> workdir() => _backendClient.workdir();
+
+  /// Pulls this device's current work directory: its stored path, or the
+  /// backend default before one is chosen. Best-effort.
+  Future<void> refreshWorkdir() async {
+    try {
+      final WorkdirInfo info = await _backendClient.workdir();
+      if (info.dir == _activeWorkdir) return;
+      _activeWorkdir = info.dir;
+      notifyListeners();
+    } catch (_) {
+      // Keep the last known path while the backend is unreachable.
+    }
+  }
 
   Future<WorkdirInfo> setWorkdir(String path, {bool create = false}) async {
     final WorkdirInfo info = await _backendClient.setWorkdir(

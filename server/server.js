@@ -19,6 +19,7 @@ const {
   runAgent,
   purgeSession,
   shutdownPools,
+  inspectCodexAccount,
 } = require('./lib/agents');
 const {
   WorkdirError,
@@ -55,7 +56,6 @@ const fcm = require('./lib/fcm');
 const { notifyAll } = require('./lib/notify');
 const { startQuotaWatch } = require('./lib/quota-watch');
 const { startClaudeQuotaKeepalive } = require('./lib/quota-keepalive');
-const { authStatus } = require('./lib/auth-status');
 const { buildDiagnostics } = require('./lib/diagnostics');
 const {
   readHistory,
@@ -66,6 +66,7 @@ const {
   flushHistory,
   clearHistory,
   redactSensitiveText,
+  recentWorkdirs,
   searchHistory,
   markdownForConversation,
 } = require('./lib/history');
@@ -817,7 +818,6 @@ const routeContext = {
   agentRequiredError,
   agentRequiredOrUnknownError,
   agentTurnDependencies,
-  authStatus,
   bearerToken,
   broadcastScope,
   buildDiagnostics,
@@ -846,6 +846,7 @@ const routeContext = {
   listQuotaSchedules,
   listTokenSummaries,
   markdownForConversation,
+  inspectCodexAccount,
   normalizeDeviceId,
   notifyTaskCompletion,
   os,
@@ -857,6 +858,7 @@ const routeContext = {
   queryBool,
   randomUUID,
   readHistory,
+  recentWorkdirs,
   requestWorkdir,
   resolveAbsoluteUploadTarget,
   resolveAgentScope,

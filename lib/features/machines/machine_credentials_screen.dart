@@ -14,30 +14,21 @@ import '../../core/credentials/qr_image_decoder.dart';
 import '../../core/credentials/qr_image_pixels.dart';
 import '../../core/credentials/qr_pixels.dart';
 import '../../core/i18n/app_strings.dart';
-import '../../core/models/cli_agent.dart';
 import '../../core/models/machine_credential.dart';
 import '../../core/settings/app_settings_controller.dart';
-import '../cli_agents/agent_status_lights.dart';
-import '../cli_agents/cli_agents_controller.dart';
-import '../ssh/ssh_terminal_controller.dart';
-import '../ssh/ssh_terminal_screen.dart';
 import 'deploy_backend_screen.dart';
 import 'machine_credentials_controller.dart';
 
 class MachineCredentialsScreen extends StatefulWidget {
   const MachineCredentialsScreen({
     required this.machinesController,
-    this.agentsController,
     this.settingsController,
-    this.backendClient,
     this.requireCredential = false,
     super.key,
   });
 
   final MachineCredentialsController machinesController;
-  final CliAgentsController? agentsController;
   final AppSettingsController? settingsController;
-  final BackendClient? backendClient;
   final bool requireCredential;
 
   @override
@@ -48,26 +39,6 @@ class MachineCredentialsScreen extends StatefulWidget {
 class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
   bool _isImporting = false;
   bool _isTesting = false;
-  late final BackendClient _backendClient;
-  late final bool _ownsBackendClient;
-  late final SshTerminalController _sshController;
-
-  @override
-  void initState() {
-    super.initState();
-    _ownsBackendClient = widget.backendClient == null;
-    _backendClient = widget.backendClient ?? BackendClient();
-    _sshController = SshTerminalController(backend: _backendClient);
-  }
-
-  @override
-  void dispose() {
-    _sshController.dispose();
-    if (_ownsBackendClient) {
-      unawaited(_backendClient.close());
-    }
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -141,16 +112,8 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
                                 onScan: _scanCredential,
                                 onPaste: _pasteCredential,
                                 onUpload: _uploadCredentialQr,
-                                onSsh: _enterSsh,
                                 onTest: _testActive,
                               ),
-                              if (widget.agentsController != null) ...<Widget>[
-                                const SizedBox(height: 18),
-                                _AgentCredentialStatusSection(
-                                  agentsController: widget.agentsController!,
-                                  onRefresh: _refreshAgents,
-                                ),
-                              ],
                             ],
                           ),
                         ),
@@ -430,31 +393,6 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
     }
   }
 
-  void _enterSsh() {
-    final MachineCredential? active = widget.machinesController.activeMachine;
-    if (active == null) return;
-    Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
-        builder: (_) => SshTerminalScreen(
-          controller: _sshController,
-          machineId: active.id,
-        ),
-      ),
-    );
-  }
-
-  Future<void> _refreshAgents() async {
-    final CliAgentsController? controller = widget.agentsController;
-    if (controller == null) return;
-    try {
-      final List<CliAgent> agents = await _backendClient.fetchAgents();
-      if (!mounted) return;
-      controller.syncAgents(agents);
-    } catch (err) {
-      _showMessage(context.l10n.agentStatusRefreshFailed(err), error: true);
-    }
-  }
-
   Future<void> _confirmDelete(MachineCredential credential) async {
     final bool? ok = await showDialog<bool>(
       context: context,
@@ -511,156 +449,6 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
         ],
       ),
     );
-  }
-}
-
-class _AgentCredentialStatusSection extends StatelessWidget {
-  const _AgentCredentialStatusSection({
-    required this.agentsController,
-    required this.onRefresh,
-  });
-
-  final CliAgentsController agentsController;
-  final Future<void> Function() onRefresh;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    return AnimatedBuilder(
-      animation: agentsController,
-      builder: (BuildContext context, Widget? _) {
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
-              child: Row(
-                children: <Widget>[
-                  Expanded(
-                    child: Text(
-                      context.l10n.cliAgents,
-                      style: TextStyle(
-                        color: theme.colorScheme.outline,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: context.l10n.recheck,
-                    onPressed: () => unawaited(onRefresh()),
-                    icon: const Icon(Icons.refresh_rounded),
-                  ),
-                ],
-              ),
-            ),
-            Card(
-              elevation: 0,
-              color: theme.colorScheme.surfaceContainerLow,
-              margin: EdgeInsets.zero,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Column(
-                children: <Widget>[
-                  for (int index = 0;
-                      index < agentsController.agents.length;
-                      index += 1)
-                    _AgentCredentialStatusTile(
-                      agent: agentsController.agents[index],
-                      showDivider: index > 0,
-                    ),
-                ],
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _AgentCredentialStatusTile extends StatelessWidget {
-  const _AgentCredentialStatusTile({
-    required this.agent,
-    required this.showDivider,
-  });
-
-  final CliAgent agent;
-  final bool showDivider;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final AppStrings strings = context.l10n;
-    final bool usable = isCliAgentSelectable(agent);
-    final Color? textColor = usable ? null : theme.colorScheme.onSurfaceVariant;
-    final CredentialExpiry? expiry = cliAgentCredentialExpiry(agent);
-    final String? subtitle = usable
-        ? (agentCredentialExpiryMessage(strings, agent) ??
-            _readySubtitle(strings, agent))
-        : agentUnavailableMessage(strings, agent);
-    return Column(
-      children: <Widget>[
-        if (showDivider) const Divider(height: 1),
-        ListTile(
-          dense: true,
-          title: Text(agent.label, style: TextStyle(color: textColor)),
-          subtitle: subtitle == null
-              ? null
-              : Text(
-                  subtitle,
-                  style: TextStyle(
-                    color: expiry?.expired == true
-                        ? theme.colorScheme.error
-                        : theme.colorScheme.outline,
-                  ),
-                ),
-          trailing: Wrap(
-            spacing: 10,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: <Widget>[
-              AgentStatusLights(agent: agent),
-              _AgentCredentialAction(agent: agent),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  String? _readySubtitle(AppStrings strings, CliAgent agent) {
-    if (agent.key == 'opencode') return strings.optionalApiKey;
-    if (agent.authKind == 'apiKey') return strings.agentReady;
-    if (agent.authKind == 'oauth') return strings.agentReady;
-    return null;
-  }
-}
-
-class _AgentCredentialAction extends StatelessWidget {
-  const _AgentCredentialAction({required this.agent});
-
-  final CliAgent agent;
-
-  @override
-  Widget build(BuildContext context) {
-    final AppStrings strings = context.l10n;
-    if (!agent.installed) {
-      return OutlinedButton(
-        onPressed: null,
-        child: Text(strings.unavailable),
-      );
-    }
-    // Every agent's credential is created on the backend host: claude/codex with
-    // their own `login` command, hermes/opencode with a provider key. Relay only
-    // reports the state it can read there.
-    if (agent.key == 'opencode' || agent.key == 'hermes') {
-      return OutlinedButton(
-        onPressed: null,
-        child: Text(strings.keyManagedOnHost),
-      );
-    }
-    return const SizedBox.shrink();
   }
 }
 
@@ -738,7 +526,6 @@ class _EmptyCredentialState extends StatelessWidget {
                         onScan: onScan,
                         onPaste: onPaste,
                         onUpload: onUpload,
-                        onSsh: null,
                         onTest: null,
                       ),
                       const SizedBox(height: 18),
@@ -798,7 +585,6 @@ class _CredentialActionButtons extends StatelessWidget {
     required this.onScan,
     required this.onPaste,
     required this.onUpload,
-    required this.onSsh,
     required this.onTest,
   });
 
@@ -809,7 +595,6 @@ class _CredentialActionButtons extends StatelessWidget {
   final VoidCallback onScan;
   final VoidCallback onPaste;
   final VoidCallback onUpload;
-  final VoidCallback? onSsh;
   final VoidCallback? onTest;
 
   @override
@@ -840,12 +625,6 @@ class _CredentialActionButtons extends StatelessWidget {
           icon: const Icon(Icons.image_search_rounded),
           label: Text(context.l10n.uploadQrImage),
         ),
-        if (onSsh != null)
-          FilledButton.icon(
-            onPressed: active == null ? null : onSsh,
-            icon: const Icon(Icons.terminal_rounded),
-            label: Text(context.l10n.enterSsh),
-          ),
         if (onTest != null)
           OutlinedButton.icon(
             onPressed: active == null || isTesting ? null : onTest,

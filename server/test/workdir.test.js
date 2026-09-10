@@ -53,15 +53,15 @@ test('resolveWorkdir refuses the filesystem root', () => {
 });
 
 test('resolveWorkdir returns the canonical absolute path', () => {
-  assert.equal(resolveWorkdir('/foo/bar'), '/foo/bar');
+  assert.equal(resolveWorkdir('/foo/bar'), path.resolve('/foo/bar'));
   // Surrounding whitespace is trimmed.
-  assert.equal(resolveWorkdir('  /foo/bar  '), '/foo/bar');
+  assert.equal(resolveWorkdir('  /foo/bar  '), path.resolve('/foo/bar'));
 });
 
 test('resolveWorkdir normalizes .. segments so the result cannot dangle outside itself', () => {
   // path.resolve collapses traversal: the returned path is always canonical.
-  assert.equal(resolveWorkdir('/foo/bar/../baz'), '/foo/baz');
-  assert.equal(resolveWorkdir('/foo/./bar'), '/foo/bar');
+  assert.equal(resolveWorkdir('/foo/bar/../baz'), path.resolve('/foo/baz'));
+  assert.equal(resolveWorkdir('/foo/./bar'), path.resolve('/foo/bar'));
 });
 
 test('resolveWorkdir expands ~ to the home directory', () => {
@@ -81,6 +81,17 @@ test('getDefaultWorkdir honors RELAY_DEFAULT_DIR', () => {
     if (prev === undefined) delete process.env.RELAY_DEFAULT_DIR;
     else process.env.RELAY_DEFAULT_DIR = prev;
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('getDefaultWorkdir uses a Relay folder in the home directory by default', () => {
+  const prev = process.env.RELAY_DEFAULT_DIR;
+  try {
+    delete process.env.RELAY_DEFAULT_DIR;
+    assert.equal(getDefaultWorkdir(), path.join(os.homedir(), 'Relay'));
+  } finally {
+    if (prev === undefined) delete process.env.RELAY_DEFAULT_DIR;
+    else process.env.RELAY_DEFAULT_DIR = prev;
   }
 });
 

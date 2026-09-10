@@ -10,7 +10,6 @@ import '../../core/backend/backend_client.dart';
 import '../../core/models/agent_session.dart';
 import '../../core/models/chat_message.dart';
 import '../../core/models/cli_agent.dart';
-import '../../core/models/group.dart';
 import '../../core/models/machine_credential.dart';
 import '../../core/platform/file_saver.dart';
 import '../../core/platform/platform_capabilities.dart';
@@ -21,12 +20,10 @@ import '../cli_agents/agent_status_lights.dart';
 import '../cli_agents/cli_agents_controller.dart';
 import '../cli_agents/cli_agents_drawer.dart';
 import '../machines/machine_credentials_controller.dart';
-import '../machines/machine_credentials_screen.dart';
 import '../settings/getting_started_screen.dart';
 import 'agent_controls.dart';
 import 'bot_chat_controller.dart';
 import 'chat_content.dart';
-import 'group_chat_screen.dart';
 
 class BotChatScreen extends StatefulWidget {
   const BotChatScreen({
@@ -415,7 +412,6 @@ class _BotChatScreenState extends State<BotChatScreen>
               ),
               title: _ChatTitle(
                 agentsController: widget.agentsController,
-                machinesController: widget.machinesController,
                 chatController: widget.chatController,
               ),
               actions: <Widget>[
@@ -446,7 +442,6 @@ class _BotChatScreenState extends State<BotChatScreen>
                   if (usePermanentSidebar)
                     _DesktopChatHeader(
                       agentsController: widget.agentsController,
-                      machinesController: widget.machinesController,
                       chatController: widget.chatController,
                       onSearch: _showHistorySearch,
                     ),
@@ -471,7 +466,10 @@ class _BotChatScreenState extends State<BotChatScreen>
                       }
                       return _NotLoggedInBanner(
                         agentLabel: agent.label,
-                        onRecheck: widget.chatController.refreshAuthStatus,
+                        onRecheck: () =>
+                            widget.chatController.refreshAuthStatus(
+                          verifyCredentials: true,
+                        ),
                       );
                     },
                   ),
@@ -487,7 +485,6 @@ class _BotChatScreenState extends State<BotChatScreen>
                             agentsController: widget.agentsController,
                             chatController: widget.chatController,
                             machinesController: widget.machinesController,
-                            settingsController: widget.settingsController,
                           );
                         }
                         final CliAgent agent =
@@ -611,13 +608,11 @@ class _BotChatScreenState extends State<BotChatScreen>
 class _DesktopChatHeader extends StatelessWidget {
   const _DesktopChatHeader({
     required this.agentsController,
-    required this.machinesController,
     required this.chatController,
     required this.onSearch,
   });
 
   final CliAgentsController agentsController;
-  final MachineCredentialsController machinesController;
   final BotChatController chatController;
   final VoidCallback onSearch;
 
@@ -638,7 +633,6 @@ class _DesktopChatHeader extends StatelessWidget {
               Expanded(
                 child: _ChatTitle(
                   agentsController: agentsController,
-                  machinesController: machinesController,
                   chatController: chatController,
                 ),
               ),
@@ -657,12 +651,10 @@ class _DesktopChatHeader extends StatelessWidget {
 class _ChatTitle extends StatelessWidget {
   const _ChatTitle({
     required this.agentsController,
-    required this.machinesController,
     required this.chatController,
   });
 
   final CliAgentsController agentsController;
-  final MachineCredentialsController machinesController;
   final BotChatController chatController;
 
   @override
@@ -670,25 +662,28 @@ class _ChatTitle extends StatelessWidget {
     return AnimatedBuilder(
       animation: Listenable.merge(<Listenable>[
         agentsController,
-        machinesController,
         chatController,
       ]),
       builder: (BuildContext context, Widget? _) {
+        // In a conversation the title names the workspace and the subtitle the
+        // agent and session, e.g. "Relay" over "Claude Code - Main".
         final bool hasChatTarget = chatController.machine != null;
-        final MachineCredential? machine = machinesController.activeMachine;
+        final String agentLabel = agentsController.activeAgent.label;
+        final String? workdir = chatController.activeWorkdir;
         final AgentSession? session = chatController.activeSession;
-        final String subtitle = <String>[
-          if (hasChatTarget && machine != null) machine.displayName,
-          if (hasChatTarget && session != null) session.name,
-        ].join(' - ');
+        final String subtitle = hasChatTarget
+            ? <String>[agentLabel, if (session != null) session.name].join(' - ')
+            : '';
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
             Text(
-              hasChatTarget
-                  ? agentsController.activeAgent.label
-                  : context.l10n.home,
+              !hasChatTarget
+                  ? context.l10n.home
+                  : workdir == null
+                      ? agentLabel
+                      : _workdirName(workdir),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
@@ -796,13 +791,11 @@ class _HomeNavigationPage extends StatefulWidget {
     required this.agentsController,
     required this.chatController,
     required this.machinesController,
-    required this.settingsController,
   });
 
   final CliAgentsController agentsController;
   final BotChatController chatController;
   final MachineCredentialsController machinesController;
-  final AppSettingsController settingsController;
 
   @override
   State<_HomeNavigationPage> createState() => _HomeNavigationPageState();
@@ -810,16 +803,13 @@ class _HomeNavigationPage extends StatefulWidget {
 
 class _HomeNavigationPageState extends State<_HomeNavigationPage> {
   bool _loading = false;
-  List<ChatGroup> _swarms = const <ChatGroup>[];
-  List<_RecentAgentSession> _agentSessions = const <_RecentAgentSession>[];
+  List<String> _recentWorkdirs = const <String>[];
   String? _lastMachineId;
-  String _lastAgentState = '';
 
   @override
   void initState() {
     super.initState();
-    widget.agentsController.addListener(_onSourceChanged);
-    widget.machinesController.addListener(_onSourceChanged);
+    widget.machinesController.addListener(_onMachineChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_refresh());
     });
@@ -827,17 +817,12 @@ class _HomeNavigationPageState extends State<_HomeNavigationPage> {
 
   @override
   void dispose() {
-    widget.agentsController.removeListener(_onSourceChanged);
-    widget.machinesController.removeListener(_onSourceChanged);
+    widget.machinesController.removeListener(_onMachineChanged);
     super.dispose();
   }
 
-  void _onSourceChanged() {
-    final String? machineId = widget.machinesController.activeMachine?.id;
-    final String agentState = _agentStateSignature(
-      widget.agentsController.agents,
-    );
-    if (machineId == _lastMachineId && agentState == _lastAgentState) {
+  void _onMachineChanged() {
+    if (widget.machinesController.activeMachine?.id == _lastMachineId) {
       setState(() {});
       return;
     }
@@ -845,92 +830,29 @@ class _HomeNavigationPageState extends State<_HomeNavigationPage> {
   }
 
   Future<void> _refresh() async {
-    final MachineCredential? machine = widget.machinesController.activeMachine;
-    final List<CliAgent> agents = widget.agentsController.agents;
-    _lastMachineId = machine?.id;
-    _lastAgentState = _agentStateSignature(agents);
-    if (machine == null) {
-      if (!mounted) return;
+    _lastMachineId = widget.machinesController.activeMachine?.id;
+    if (_lastMachineId == null) {
       setState(() {
-        _swarms = const <ChatGroup>[];
-        _agentSessions = const <_RecentAgentSession>[];
+        _recentWorkdirs = const <String>[];
         _loading = false;
       });
       return;
     }
 
     setState(() => _loading = true);
-    List<ChatGroup> swarms = const <ChatGroup>[];
+    final Future<void> workdir = widget.chatController.refreshWorkdir();
+    List<String> recent = const <String>[];
     try {
-      swarms = await widget.chatController.backend.fetchGroups();
+      recent = await widget.chatController.backend.recentWorkdirs();
     } catch (_) {
-      swarms = const <ChatGroup>[];
+      // An offline backend should not break the home page.
     }
-
-    final List<_RecentAgentSession> sessions = <_RecentAgentSession>[];
-    await Future.wait<void>(
-      agents.map((CliAgent agent) async {
-        try {
-          final AgentSessionList list = await widget.chatController.backend
-              .fetchSessions(agent.key);
-          for (final AgentSession session in list.sessions) {
-            sessions.add(_RecentAgentSession(agent: agent, session: session));
-          }
-        } catch (_) {
-          // A missing CLI or offline backend should not break the home page.
-        }
-      }),
-    );
-    sessions.sort(
-      (_RecentAgentSession a, _RecentAgentSession b) =>
-          b.session.updatedAt.compareTo(a.session.updatedAt),
-    );
+    await workdir;
     if (!mounted) return;
     setState(() {
-      _swarms = swarms.take(5).toList(growable: false);
-      _agentSessions = sessions.take(6).toList(growable: false);
+      _recentWorkdirs = recent.take(3).toList(growable: false);
       _loading = false;
     });
-  }
-
-  Future<void> _openSwarm(ChatGroup swarm) async {
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
-        builder: (_) => GroupChatScreen(
-          agentsController: widget.agentsController,
-          settingsController: widget.settingsController,
-          initialGroupId: swarm.id,
-        ),
-      ),
-    );
-    if (mounted) unawaited(_refresh());
-  }
-
-  Future<void> _openAgentSession(_RecentAgentSession entry) async {
-    final MachineCredential? machine = widget.machinesController.activeMachine;
-    if (!isCliAgentSelectable(entry.agent)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(agentUnavailableMessage(context.l10n, entry.agent)),
-        ),
-      );
-      return;
-    }
-    if (machine == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.l10n.importOrChooseMachine)),
-      );
-      return;
-    }
-    if (widget.chatController.isThinking) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(context.l10n.agentBusyRetryLater)));
-      return;
-    }
-    await widget.agentsController.setActive(entry.agent.key);
-    await widget.chatController.loadFor(entry.agent, machine);
-    await widget.chatController.selectSession(entry.agent, entry.session.id);
   }
 
   void _openGettingStarted() {
@@ -939,23 +861,12 @@ class _HomeNavigationPageState extends State<_HomeNavigationPage> {
     );
   }
 
-  void _openCredentials() {
-    Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
-        builder: (_) => MachineCredentialsScreen(
-          machinesController: widget.machinesController,
-          agentsController: widget.agentsController,
-          backendClient: widget.chatController.backend,
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final AppStrings strings = context.l10n;
     final ThemeData theme = Theme.of(context);
     final MachineCredential? machine = widget.machinesController.activeMachine;
+    final String? workdir = widget.chatController.activeWorkdir;
     return RefreshIndicator(
       onRefresh: _refresh,
       child: ListView(
@@ -1005,114 +916,36 @@ class _HomeNavigationPageState extends State<_HomeNavigationPage> {
                     ActiveMachineStatusTile(
                       activeMachine: machine,
                       chatController: widget.chatController,
+                      agentsController: widget.agentsController,
                     ),
-                  const SizedBox(height: 12),
-                  _HomeSectionCard(
-                    child: ListTile(
-                      leading: const Icon(Icons.vpn_key_outlined),
-                      title: Text(strings.manageCredentials),
-                      subtitle: Text(strings.manageCredentialsHomeHint),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: _openCredentials,
+                  if (workdir != null) ...<Widget>[
+                    const SizedBox(height: 12),
+                    _HomeSection(
+                      title: strings.currentWorkspace,
+                      children: <Widget>[_WorkdirTile(dir: workdir)],
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  _HomeSectionCard(
-                    child: ListTile(
-                      leading: const Icon(Icons.school_outlined),
-                      title: Text(strings.gettingStarted),
-                      subtitle: Text(strings.gettingStartedHomeHint),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: _openGettingStarted,
-                    ),
-                  ),
+                  ],
                   const SizedBox(height: 12),
                   _HomeSection(
-                    title: strings.recentSwarms,
-                    emptyText: strings.noRecentSwarms,
+                    title: strings.recentWorkspaces,
+                    emptyText: strings.noRecentWorkspaces,
                     children: <Widget>[
-                      for (final ChatGroup swarm in _swarms)
-                        ListTile(
-                          leading: const Icon(Icons.groups_outlined),
-                          title: Text(
-                            swarm.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          subtitle: Text(
-                            swarm.memberLabels.join(' · '),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap: () => _openSwarm(swarm),
-                        ),
+                      for (final String dir in _recentWorkdirs)
+                        _WorkdirTile(dir: dir),
                     ],
                   ),
                   const SizedBox(height: 12),
                   _HomeSection(
-                    title: strings.recentAgentSessions,
-                    emptyText: strings.noRecentAgentSessions,
+                    title: strings.tutorial,
                     children: <Widget>[
-                      for (final _RecentAgentSession entry in _agentSessions)
-                        Builder(
-                          builder: (BuildContext context) {
-                            final bool usable = isCliAgentSelectable(
-                              entry.agent,
-                            );
-                            final Color? textColor = usable
-                                ? null
-                                : theme.colorScheme.onSurfaceVariant;
-                            return ListTile(
-                              leading: Icon(
-                                Icons.smart_toy_outlined,
-                                color: textColor,
-                              ),
-                              title: Text(
-                                strings.agentSessionLabel(
-                                  entry.agent.label,
-                                  entry.session.name,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(color: textColor),
-                              ),
-                              subtitle: Text(
-                                usable
-                                    ? formatShortTime(
-                                        context,
-                                        entry.session.updatedAt
-                                            .toIso8601String(),
-                                      )
-                                    : agentUnavailableMessage(
-                                        strings,
-                                        entry.agent,
-                                      ),
-                              ),
-                              trailing: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: <Widget>[
-                                  AgentStatusLights(
-                                    agent: entry.agent,
-                                    compact: true,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  const Icon(Icons.chevron_right),
-                                ],
-                              ),
-                              onTap: () => _openAgentSession(entry),
-                            );
-                          },
-                        ),
+                      ListTile(
+                        leading: const Icon(Icons.school_outlined),
+                        title: Text(strings.gettingStarted),
+                        subtitle: Text(strings.gettingStartedHomeHint),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: _openGettingStarted,
+                      ),
                     ],
-                  ),
-                  const SizedBox(height: 24),
-                  Text(
-                    strings.chooseConversationTarget,
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.outline,
-                    ),
                   ),
                 ],
               ),
@@ -1127,7 +960,7 @@ class _HomeNavigationPageState extends State<_HomeNavigationPage> {
 class _HomeSection extends StatelessWidget {
   const _HomeSection({
     required this.title,
-    required this.emptyText,
+    this.emptyText = '',
     required this.children,
   });
 
@@ -1194,25 +1027,32 @@ class _HomeSectionCard extends StatelessWidget {
   }
 }
 
-String _agentStateSignature(List<CliAgent> agents) {
-  return agents
-      .map(
-        (CliAgent agent) => <Object?>[
-          agent.key,
-          agent.installed,
-          agent.authed,
-          agent.usable,
-          agent.authKind,
-        ].join(':'),
-      )
-      .join('|');
+class _WorkdirTile extends StatelessWidget {
+  const _WorkdirTile({required this.dir});
+
+  final String dir;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: const Icon(Icons.folder_outlined),
+      title: Text(
+        _workdirName(dir),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      subtitle: Text(dir, maxLines: 1, overflow: TextOverflow.ellipsis),
+    );
+  }
 }
 
-class _RecentAgentSession {
-  const _RecentAgentSession({required this.agent, required this.session});
-
-  final CliAgent agent;
-  final AgentSession session;
+/// The folder name of a work directory ("Relay" for "/home/me/Relay" or
+/// "C:\\code\\Relay"), or the whole path for a filesystem root.
+String _workdirName(String dir) {
+  final String name = dir
+      .split(RegExp(r'[\\/]'))
+      .lastWhere((String part) => part.isNotEmpty, orElse: () => '');
+  return name.isEmpty ? dir : name;
 }
 
 class _HistorySearchDialog extends StatefulWidget {

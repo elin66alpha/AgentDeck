@@ -63,6 +63,12 @@ function createCodexDriver(rpc) {
       return rpc.request('initialize', { clientInfo: CLIENT_INFO });
     },
 
+    readAccount(options = {}) {
+      return rpc.request('account/read', {
+        refreshToken: options.refreshToken === true,
+      });
+    },
+
     async openSession(req) {
       if (req.resumeId) {
         try {
@@ -175,7 +181,13 @@ function createCodexDriver(rpc) {
 }
 
 function createCodexSessionPool(options = {}) {
-  return createStdioAgentPool({ ...options, driver: createCodexDriver });
+  const pool = createStdioAgentPool({ ...options, driver: createCodexDriver });
+  return {
+    ...pool,
+    readAccount(accountOptions = {}) {
+      return pool.callDriver('readAccount', accountOptions);
+    },
+  };
 }
 
 module.exports = { createCodexSessionPool };

@@ -584,6 +584,20 @@ class UsageReport {
   final String createdAt;
   final List<UsageAgent> agents;
   final bool hasStale;
+
+  /// This report with [other]'s agents replacing same-key entries in place and
+  /// new ones appended, so per-source queries can land one at a time.
+  UsageReport merge(UsageReport other) {
+    final List<UsageAgent> merged = <String, UsageAgent>{
+      for (final UsageAgent agent in agents) agent.key: agent,
+      for (final UsageAgent agent in other.agents) agent.key: agent,
+    }.values.toList(growable: false);
+    return UsageReport(
+      createdAt: other.createdAt,
+      agents: merged,
+      hasStale: merged.any((UsageAgent agent) => agent.stale),
+    );
+  }
 }
 
 class QuotaSchedule {
@@ -1030,10 +1044,12 @@ class BackendClient {
     );
   }
 
-  Future<UsageReport> usageReport() async {
+  Future<UsageReport> usageReport({String? source}) async {
     final Object? decoded = await _requestJson(
       'GET',
-      '/api/usage',
+      source == null
+          ? '/api/usage'
+          : '/api/usage?source=${Uri.encodeQueryComponent(source)}',
       timeout: const Duration(seconds: 45),
     );
     if (decoded is! Map) {
@@ -1352,8 +1368,13 @@ class BackendClient {
   /// Best-effort login state per agent so the app can warn before sending a
   /// message. Maps agentKey -> loggedIn, where the value is true/false when the
   /// backend can read the CLI's credentials, or null when it cannot tell.
-  Future<Map<String, bool?>> fetchAuthStatus() async {
-    final Object? decoded = await _requestJson('GET', '/api/auth/status');
+  Future<Map<String, bool?>> fetchAuthStatus({
+    bool verifyCredentials = false,
+  }) async {
+    final String path = verifyCredentials
+        ? '/api/auth/status?verifyCredentials=true'
+        : '/api/auth/status';
+    final Object? decoded = await _requestJson('GET', path);
     final Map<String, bool?> result = <String, bool?>{};
     if (decoded is Map && decoded['agents'] is List) {
       for (final Object? item in (decoded['agents'] as List)) {
@@ -1368,8 +1389,11 @@ class BackendClient {
   }
 
   /// The agents the backend host knows about, including install/auth status.
-  Future<List<CliAgent>> fetchAgents() async {
-    final Object? decoded = await _requestJson('GET', '/api/agents');
+  Future<List<CliAgent>> fetchAgents({bool verifyCredentials = false}) async {
+    final String path = verifyCredentials
+        ? '/api/agents?verifyCredentials=true'
+        : '/api/agents';
+    final Object? decoded = await _requestJson('GET', path);
     if (decoded is! Map) {
       throw BackendException('Invalid agents response.');
     }
@@ -1471,6 +1495,16 @@ class BackendClient {
       throw BackendException('Invalid work directory response.');
     }
     return WorkdirInfo.fromJson(decoded.cast<String, Object?>());
+  }
+
+  /// Work directories with conversation history on this machine, most recent
+  /// first.
+  Future<List<String>> recentWorkdirs() async {
+    final Object? decoded = await _requestJson('GET', '/api/workdirs/recent');
+    final Object? workdirs = decoded is Map ? decoded['workdirs'] : null;
+    return workdirs is List
+        ? workdirs.whereType<String>().toList(growable: false)
+        : const <String>[];
   }
 
   Future<WorkdirInfo> setWorkdir(String path, {bool create = false}) async {

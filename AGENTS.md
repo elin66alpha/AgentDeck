@@ -124,13 +124,18 @@ clients and bundles CanvasKit locally instead of depending on gstatic.
   `models-extra.json` by mtime. A CLI update calls `clearModelDiscoveryCache`,
   which is what makes new models appear at once.
 - `GET /api/agents` returns all four known agents with install/auth/usability
-  state. Claude and Codex require OAuth; OpenCode and Hermes credentials are
-  managed on the host and become selectable when installed.
+  state. Claude requires OAuth. Codex reports its active app-server auth mode,
+  including managed ChatGPT, API-key, external-token, and host-managed provider
+  modes; OpenCode and Hermes credentials are managed on the host and become
+  selectable when installed.
 - Every credential is created on the backend host by the CLI itself. Relay does
-  not log an agent in. `server/lib/agent-status.js` reads auth state and, for
-  Claude and Codex, a `credentialExpiresAt` timestamp. `server/lib/usage.js`
-  separately reads and may refresh their OAuth credentials for quota reporting
-  and keepalive. A token value must never reach Relay's API or app.
+  not log an agent in. `server/lib/agent-status.js` reads stored auth state and
+  Claude's `credentialExpiresAt`; Codex has no login-expiry timestamp because
+  its managed short-lived tokens auto-refresh. An explicit credential recheck
+  uses `account/read` with `refreshToken: true` on the shared Codex app-server.
+  `server/lib/usage.js` separately reads and may refresh OAuth credentials for
+  quota reporting and keepalive. A token or account identity value must never
+  reach Relay's API or app.
 
 ### Backend modules and persistence
 

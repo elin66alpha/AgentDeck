@@ -8,6 +8,8 @@ const createMetaRouter = require('../routes/meta');
 
 let server;
 let base;
+let accountChecks = 0;
+let nextAccountError = null;
 
 before(async () => {
   const app = express();
@@ -25,7 +27,7 @@ before(async () => {
           installed: true,
           authed: false,
           authKind: 'oauth',
-          credentialExpiresAt: null,
+          credentialExpiresAt: 1893456789000,
         },
         opencode: {
           installed: true,
@@ -40,6 +42,22 @@ before(async () => {
         { key: 'opencode', label: 'OpenCode', description: 'OpenCode CLI' },
         { key: 'hermes', label: 'Hermes', description: 'Hermes CLI' },
       ],
+      inspectCodexAccount: async ({ refreshToken }) => {
+        accountChecks += 1;
+        assert.equal(refreshToken, true);
+        if (nextAccountError) {
+          const err = nextAccountError;
+          nextAccountError = null;
+          throw err;
+        }
+        return {
+          account: {
+            type: 'apiKey',
+            email: 'must-not-reach-the-client@example.invalid',
+          },
+          requiresOpenaiAuth: true,
+        };
+      },
     }),
   );
   await new Promise((resolve) => {
@@ -97,4 +115,53 @@ test('/api/agents returns every agent with install/auth usability fields', async
   // hermes is managed out-of-band, so it is usable once installed even with no
   // key Relay can see.
   assert.equal(byKey.hermes.usable, true);
+  assert.equal(accountChecks, 0);
+});
+
+test('/api/agents can verify Codex credentials through account/read', async () => {
+  const response = await fetch(`${base}/api/agents?verifyCredentials=true`);
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  const codex = body.agents.find((agent) => agent.key === 'codex');
+
+  assert.equal(codex.authed, true);
+  assert.equal(codex.usable, true);
+  assert.equal(codex.authKind, 'apiKey');
+  assert.equal(codex.credentialExpiresAt, null);
+  assert.equal(JSON.stringify(codex).includes('must-not-reach'), false);
+  assert.equal(accountChecks, 1);
+});
+
+test('/api/auth/status uses the same forced Codex verification', async () => {
+  const response = await fetch(
+    `${base}/api/auth/status?verifyCredentials=true`,
+  );
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  const codex = body.agents.find((agent) => agent.key === 'codex');
+  assert.equal(codex.loggedIn, true);
+  assert.equal(accountChecks, 2);
+});
+
+test('a rejected refresh is reported as requiring login', async () => {
+  nextAccountError = new Error(
+    'OAuth refresh token was rejected: refresh_token_expired',
+  );
+  const response = await fetch(`${base}/api/agents?verifyCredentials=true`);
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  const codex = body.agents.find((agent) => agent.key === 'codex');
+  assert.equal(codex.authed, false);
+  assert.equal(codex.usable, false);
+  assert.equal(accountChecks, 3);
+});
+
+test('a transient verification failure is not misreported as logout', async () => {
+  nextAccountError = new Error('connect ETIMEDOUT');
+  const response = await fetch(`${base}/api/agents?verifyCredentials=true`);
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), {
+    error: 'Codex credential verification failed. Try again.',
+  });
+  assert.equal(accountChecks, 4);
 });

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:xterm/xterm.dart';
 
 import '../../core/i18n/app_strings.dart';
+import '../../core/platform/platform_capabilities.dart';
 import 'ssh_terminal_controller.dart';
 
 class SshTerminalScreen extends StatefulWidget {
@@ -37,7 +38,7 @@ class _SshTerminalScreenState extends State<SshTerminalScreen> {
           backgroundColor: terminalTheme.background,
           appBar: AppBar(
             leading: IconButton(
-              tooltip: context.l10n.backToCredentials,
+              tooltip: context.l10n.backToMachineDetails,
               onPressed: () => Navigator.of(context).pop(),
               icon: const Icon(Icons.arrow_back_rounded),
             ),
@@ -58,68 +59,81 @@ class _SshTerminalScreenState extends State<SshTerminalScreen> {
             ],
           ),
           body: SafeArea(
-            child: Stack(
+            child: Column(
               children: <Widget>[
-                Positioned.fill(
-                  child: KeyedSubtree(
-                    key: ObjectKey(widget.controller.terminal),
-                    child: TerminalView(
-                      widget.controller.terminal,
-                      controller: widget.controller.terminalController,
-                      theme: terminalTheme,
-                      textStyle: const TerminalStyle(
-                        fontSize: 14,
-                        fontFamily: 'RelayTerminalMono',
-                        fontFamilyFallback: <String>[
-                          'Cascadia Mono',
-                          'Consolas',
-                          'Menlo',
-                          'Monaco',
-                          'Liberation Mono',
-                          'DejaVu Sans Mono',
-                          'Noto Sans Mono',
-                          'Noto Sans Mono CJK SC',
-                          'Noto Sans Mono CJK TC',
-                          'Noto Sans Mono CJK KR',
-                          'Noto Sans Mono CJK JP',
-                          'Noto Color Emoji',
-                          'Noto Sans Symbols',
-                          'monospace',
-                        ],
+                Expanded(
+                  child: Stack(
+                    children: <Widget>[
+                      Positioned.fill(
+                        child: KeyedSubtree(
+                          key: ObjectKey(widget.controller.terminal),
+                          child: TerminalView(
+                            widget.controller.terminal,
+                            controller: widget.controller.terminalController,
+                            theme: terminalTheme,
+                            textStyle: const TerminalStyle(
+                              fontSize: 14,
+                              fontFamily: 'RelayTerminalMono',
+                              fontFamilyFallback: <String>[
+                                'Cascadia Mono',
+                                'Consolas',
+                                'Menlo',
+                                'Monaco',
+                                'Liberation Mono',
+                                'DejaVu Sans Mono',
+                                'Noto Sans Mono',
+                                'Noto Sans Mono CJK SC',
+                                'Noto Sans Mono CJK TC',
+                                'Noto Sans Mono CJK KR',
+                                'Noto Sans Mono CJK JP',
+                                'Noto Color Emoji',
+                                'Noto Sans Symbols',
+                                'monospace',
+                              ],
+                            ),
+                            padding: const EdgeInsets.all(8),
+                            autofocus: true,
+                            deleteDetection: true,
+                            keyboardAppearance: theme.brightness,
+                            onSecondaryTapDown:
+                                (TapDownDetails details, _) async {
+                              final TerminalController controller =
+                                  widget.controller.terminalController;
+                              final selection = controller.selection;
+                              if (selection != null) {
+                                final String text = widget
+                                    .controller.terminal.buffer
+                                    .getText(selection);
+                                controller.clearSelection();
+                                await Clipboard.setData(
+                                  ClipboardData(text: text),
+                                );
+                                return;
+                              }
+                              final ClipboardData? data =
+                                  await Clipboard.getData('text/plain');
+                              if (data?.text != null) {
+                                widget.controller.terminal.paste(data!.text!);
+                              }
+                            },
+                          ),
+                        ),
                       ),
-                      padding: const EdgeInsets.all(8),
-                      autofocus: true,
-                      deleteDetection: true,
-                      keyboardAppearance: theme.brightness,
-                      onSecondaryTapDown: (TapDownDetails details, _) async {
-                        final TerminalController controller =
-                            widget.controller.terminalController;
-                        final selection = controller.selection;
-                        if (selection != null) {
-                          final String text = widget.controller.terminal.buffer
-                              .getText(selection);
-                          controller.clearSelection();
-                          await Clipboard.setData(ClipboardData(text: text));
-                          return;
-                        }
-                        final ClipboardData? data =
-                            await Clipboard.getData('text/plain');
-                        if (data?.text != null) {
-                          widget.controller.terminal.paste(data!.text!);
-                        }
-                      },
-                    ),
+                      if (_showBlockingState(widget.controller.status))
+                        Positioned.fill(
+                          child: ColoredBox(
+                            color: terminalTheme.background
+                                .withValues(alpha: 0.94),
+                            child: _TerminalStateMessage(
+                              controller: widget.controller,
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
-                if (_showBlockingState(widget.controller.status))
-                  Positioned.fill(
-                    child: ColoredBox(
-                      color: terminalTheme.background.withValues(alpha: 0.94),
-                      child: _TerminalStateMessage(
-                        controller: widget.controller,
-                      ),
-                    ),
-                  ),
+                if (!usesHardwareKeyboard)
+                  _MobileKeyBar(controller: widget.controller),
               ],
             ),
           ),
@@ -164,6 +178,95 @@ class _TerminalStateMessage extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Keys a phone keyboard lacks. Ctrl and Shift latch for the next key; the
+/// rest fire immediately.
+class _MobileKeyBar extends StatelessWidget {
+  const _MobileKeyBar({required this.controller});
+
+  final SshTerminalController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    // Keeps focus (and the soft keyboard) on the terminal while tapping keys.
+    return ExcludeFocus(
+      child: SizedBox(
+        height: 44,
+        child: Row(
+          children: <Widget>[
+            _KeyButton(
+              selected: controller.ctrlLatched,
+              onPressed: controller.toggleCtrl,
+              child: const Text('Ctrl'),
+            ),
+            _KeyButton(
+              selected: controller.shiftLatched,
+              onPressed: controller.toggleShift,
+              child: const Text('Shift'),
+            ),
+            _KeyButton(
+              onPressed: () => controller.sendKey(TerminalKey.escape),
+              child: const Text('Esc'),
+            ),
+            _KeyButton(
+              onPressed: () => controller.sendKey(TerminalKey.tab),
+              child: const Text('Tab'),
+            ),
+            _KeyButton(
+              onPressed: () => controller.sendKey(TerminalKey.arrowLeft),
+              child: const Icon(Icons.keyboard_arrow_left_rounded),
+            ),
+            _KeyButton(
+              onPressed: () => controller.sendKey(TerminalKey.arrowUp),
+              child: const Icon(Icons.keyboard_arrow_up_rounded),
+            ),
+            _KeyButton(
+              onPressed: () => controller.sendKey(TerminalKey.arrowDown),
+              child: const Icon(Icons.keyboard_arrow_down_rounded),
+            ),
+            _KeyButton(
+              onPressed: () => controller.sendKey(TerminalKey.arrowRight),
+              child: const Icon(Icons.keyboard_arrow_right_rounded),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _KeyButton extends StatelessWidget {
+  const _KeyButton({
+    required this.onPressed,
+    required this.child,
+    this.selected = false,
+  });
+
+  final VoidCallback onPressed;
+  final Widget child;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.all(2),
+        child: TextButton(
+          onPressed: onPressed,
+          style: TextButton.styleFrom(
+            padding: EdgeInsets.zero,
+            minimumSize: Size.zero,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            backgroundColor: selected ? colors.primary : null,
+            foregroundColor: selected ? colors.onPrimary : colors.onSurface,
+          ),
+          child: child,
         ),
       ),
     );

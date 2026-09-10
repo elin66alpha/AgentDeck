@@ -170,7 +170,9 @@ class _SessionBackendClient extends BackendClient {
   }
 
   @override
-  Future<Map<String, bool?>> fetchAuthStatus() async {
+  Future<Map<String, bool?>> fetchAuthStatus({
+    bool verifyCredentials = false,
+  }) async {
     return const <String, bool?>{};
   }
 
