@@ -66,6 +66,7 @@ const {
   flushHistory,
   clearHistory,
   redactSensitiveText,
+  recentWorkdirs,
   searchHistory,
   markdownForConversation,
 } = require('./lib/history');
@@ -857,6 +858,7 @@ const routeContext = {
   queryBool,
   randomUUID,
   readHistory,
+  recentWorkdirs,
   requestWorkdir,
   resolveAbsoluteUploadTarget,
   resolveAgentScope,

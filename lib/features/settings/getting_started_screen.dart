@@ -134,7 +134,7 @@ const List<_GettingStartedStep> _zhSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: '选择一个 CLI 智能体',
     body:
-        '打开左侧栏选择 agent。红绿状态灯表示安装和认证状态；所有 CLI 的登录或 provider 配置都要在后端主机上完成，然后可在“管理凭证”中重新检查状态。',
+        '打开左侧栏选择 agent。红绿状态灯表示安装和认证状态；所有 CLI 的登录或 provider 配置都要在后端主机上完成，然后点击机器进入“机器详情”重新检查状态。',
   ),
   _GettingStartedStep(
     title: '像发消息一样描述任务',
@@ -145,8 +145,8 @@ const List<_GettingStartedStep> _zhSteps = <_GettingStartedStep>[
     body: '蜂群可以把多个智能体放在同一个对话里。创建蜂群后，用 @某个成员 指定谁来回答。',
   ),
   _GettingStartedStep(
-    title: '从首页快速回到最近工作',
-    body: '首页会列出最近的蜂群和智能体会话。下次打开 Relay，可以从首页直接跳回上次的工作。',
+    title: '在首页查看工作区',
+    body: '首页会显示当前机器、当前工作区，以及最近工作过的工作区。',
   ),
   _GettingStartedStep(
     title: '文件系统用于查看和上传文件',
@@ -163,7 +163,7 @@ const List<_GettingStartedStep> _enSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: 'Choose a CLI agent',
     body:
-        'Open the left drawer and choose an agent. Red/green lights show installation and authentication. Complete every CLI login or provider setup on the backend host, then recheck it from Manage credentials.',
+        'Open the left drawer and choose an agent. Red/green lights show installation and authentication. Complete every CLI login or provider setup on the backend host, then tap the machine to recheck it on Machine details.',
   ),
   _GettingStartedStep(
     title: 'Describe the task like a message',
@@ -176,9 +176,9 @@ const List<_GettingStartedStep> _enSteps = <_GettingStartedStep>[
         'A swarm puts multiple agents in one conversation. After creating one, mention a member with @ to choose who should respond.',
   ),
   _GettingStartedStep(
-    title: 'Return to recent work from Home',
+    title: 'See your workspaces on Home',
     body:
-        'The home page lists recent swarms and agent sessions, so you can jump back into work quickly next time.',
+        'The home page shows the current machine, the current workspace, and the workspaces you worked in recently.',
   ),
   _GettingStartedStep(
     title: 'Use File system for files',

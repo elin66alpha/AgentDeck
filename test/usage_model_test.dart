@@ -69,4 +69,47 @@ void main() {
       expect(agent.quotas, isEmpty);
     });
   });
+
+  group('UsageReport.merge', () {
+    UsageReport report(String createdAt, List<Object?> agents) =>
+        UsageReport.fromJson(<String, Object?>{
+          'createdAt': createdAt,
+          'agents': agents,
+        });
+
+    test('replaces a same-key agent in place', () {
+      final UsageReport base = report('t1', <Object?>[
+        <String, Object?>{'key': 'claude', 'stale': true},
+        <String, Object?>{'key': 'codex'},
+      ]);
+      final UsageReport merged = base.merge(
+        report('t2', <Object?>[
+          <String, Object?>{'key': 'claude', 'stale': false},
+        ]),
+      );
+      expect(merged.agents.map((UsageAgent a) => a.key), <String>[
+        'claude',
+        'codex',
+      ]);
+      expect(merged.agents.first.stale, isFalse);
+      expect(merged.hasStale, isFalse);
+      expect(merged.createdAt, 't2');
+    });
+
+    test('appends a new agent and recomputes hasStale', () {
+      final UsageReport base = report('t1', <Object?>[
+        <String, Object?>{'key': 'claude'},
+      ]);
+      final UsageReport merged = base.merge(
+        report('t2', <Object?>[
+          <String, Object?>{'key': 'codex', 'stale': true},
+        ]),
+      );
+      expect(merged.agents.map((UsageAgent a) => a.key), <String>[
+        'claude',
+        'codex',
+      ]);
+      expect(merged.hasStale, isTrue);
+    });
+  });
 }

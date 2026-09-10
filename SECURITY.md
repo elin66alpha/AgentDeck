@@ -44,9 +44,9 @@ Recommended practice:
   agent settings, groups, CLI login state, or FCM service-account files.
 
 Generating a new credential deletes old QR/JSON export files, but it does not
-revoke previously issued device tokens. The backend status panel lists token
-ids, device metadata, and last-use time so each old token can be revoked and
-then deleted deliberately.
+revoke previously issued device tokens. The app's **Machine details** page lists
+token ids, device metadata, and last-use time so each old token can be revoked
+and then deleted deliberately.
 
 ## API protections
 

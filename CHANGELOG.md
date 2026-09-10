@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Added
+
+- SSH terminal key bar on Android and iOS with Ctrl, Shift, Esc, Tab, and the
+  arrow keys a phone keyboard lacks. Ctrl and Shift latch for the next key,
+  typed or tapped, then release, so Ctrl then `c` sends `^C`.
+
+### Changed
+
+- A brand-new device now starts in `~/Relay` instead of `~/agent_deck`;
+  `RELAY_DEFAULT_DIR` still overrides it.
+- The chat header names the current workspace, with `Agent - Session` below it.
+- The home page shows the current machine, the current workspace, up to three
+  recent workspaces (from `GET /api/workdirs/recent`), and a Tutorial section,
+  replacing recent swarms, agent sessions, and the Manage credentials shortcut.
+- The drawer lists CLI agents above Swarm.
+- Tapping the machine opens a Machine details page: Enter SSH and CLI agent
+  status (both moved from Manage credentials), device tokens, then the backend
+  status.
+- File system: Set as work path is now the primary button, ahead of Upload file;
+  swiping right on the file list goes up one folder.
+- Usage query no longer opens on a full-screen spinner: the Claude Code and
+  Codex cards show at once and each fills in as soon as its own quota answers
+  (`GET /api/usage?source=claude|codex`), so a slow Codex probe no longer holds
+  back Claude.
+
 ### Fixed
 
 - Codex authentication status now follows its app-server `account/read`

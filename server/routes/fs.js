@@ -13,6 +13,7 @@ module.exports = function createFsRouter(ctx) {
     prepareDownload,
     prepareDownloadAbsolute,
     queryBool,
+    recentWorkdirs,
     requestWorkdir,
     resolveAbsoluteUploadTarget,
     resolveUploadTarget,
@@ -33,6 +34,10 @@ module.exports = function createFsRouter(ctx) {
     } catch (err) {
       return sendWorkdirError(res, err);
     }
+  });
+
+  router.get('/api/workdirs/recent', (_req, res) => {
+    res.json({ workdirs: recentWorkdirs() });
   });
 
   // Validate (and optionally create) a path the device wants to switch to. With

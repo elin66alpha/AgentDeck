@@ -300,6 +300,24 @@ function searchHistory({ workdir, query, agentKey = '', sessionNameFor, limit = 
   return matches;
 }
 
+// Work directories with conversation history, most recently active first.
+function recentWorkdirs(limit = 10) {
+  const latest = new Map();
+  for (const [scopeKey, messages] of Object.entries(ensureLoaded())) {
+    const info = scopeInfo(scopeKey);
+    if (!info || !Array.isArray(messages) || messages.length === 0) continue;
+    const last = messages[messages.length - 1] || {};
+    const at = String(last.createdAt || last.updatedAt || '');
+    if (!latest.has(info.workdir) || at > latest.get(info.workdir)) {
+      latest.set(info.workdir, at);
+    }
+  }
+  return [...latest]
+    .sort((a, b) => b[1].localeCompare(a[1]))
+    .slice(0, limit)
+    .map(([workdir]) => workdir);
+}
+
 function markdownForConversation({ agentLabel, sessionName, messages, exportedAt }) {
   const lines = [
     '# Relay Conversation Export',
@@ -332,6 +350,7 @@ module.exports = {
   clearHistory,
   redactSensitiveText,
   historyScopesFor,
+  recentWorkdirs,
   searchHistory,
   markdownForConversation,
 };

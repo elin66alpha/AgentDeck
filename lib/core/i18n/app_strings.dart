@@ -35,9 +35,6 @@ class AppStrings {
   String get gettingStarted => isZh ? '开始使用' : 'Getting started';
   String get notConnected => isZh ? '未连接机器' : 'No machine connected';
   String get manageCredentials => isZh ? '管理凭证' : 'Manage credentials';
-  String get manageCredentialsHomeHint => isZh
-      ? '查看 CLI 智能体状态与凭据有效期'
-      : 'Check CLI agent status and credential expiry';
   String get cliAgents => isZh ? 'CLI 智能体' : 'CLI agents';
   String get groupChat => isZh ? '蜂群' : 'Swarm';
   String get groupChatSubtitle => isZh ? '多智能体蜂群协作' : 'Multi-agent swarm';
@@ -416,32 +413,22 @@ class AppStrings {
       isZh ? '执行步骤 · $count 条' : '$count ${count == 1 ? 'step' : 'steps'}';
   String startChat(String agent) =>
       isZh ? '与 $agent 开始对话' : 'Start chatting with $agent';
-  String get chooseConversationTarget => isZh
-      ? '请在左侧抽屉里选择蜂群或 CLI 智能体来开始工作'
-      : 'Choose a swarm or CLI agent from the left drawer to start';
-  String get homeSubtitle => isZh
-      ? '从这里查看机器状态，并快速回到最近的蜂群或智能体会话。'
-      : 'Check the machine status and jump back into recent swarm or agent sessions.';
-  String get recentSwarms => isZh ? '最近使用的蜂群' : 'Recent swarms';
-  String get recentAgentSessions =>
-      isZh ? '最近使用的智能体会话' : 'Recent agent sessions';
-  String get noRecentSwarms => isZh
-      ? '还没有蜂群。可以从左侧栏创建一个。'
-      : 'No swarms yet. Create one from the left drawer.';
-  String get noRecentAgentSessions => isZh
-      ? '还没有智能体会话。可以从左侧栏选择一个 CLI 智能体开始。'
-      : 'No agent sessions yet. Choose a CLI agent from the left drawer to start.';
-  String agentSessionLabel(String agent, String session) =>
-      isZh ? '$agent · $session' : '$agent · $session';
+  String get homeSubtitle =>
+      isZh ? '从这里查看机器状态与工作区。' : 'Check the machine status and workspaces.';
+  String get currentWorkspace => isZh ? '当前工作区' : 'Current workspace';
+  String get recentWorkspaces => isZh ? '最近工作过的工作区' : 'Recent workspaces';
+  String get noRecentWorkspaces =>
+      isZh ? '还没有工作过的工作区。' : 'No recent workspaces yet.';
   String get gettingStartedHomeHint => isZh
       ? '第一次使用或忘记流程时，从这里快速查看步骤。'
       : 'Use this when you are new or want a quick reminder.';
   String get credentialTitle => isZh ? '机器凭证' : 'Machine credentials';
   String get currentMachine => isZh ? '当前机器' : 'Current machine';
+  String get machineDetails => isZh ? '机器详情' : 'Machine details';
   String get enterSsh => isZh ? '进入SSH' : 'Enter SSH';
   String get sshTerminal => isZh ? 'SSH 终端' : 'SSH terminal';
-  String get backToCredentials =>
-      isZh ? '返回管理凭证' : 'Back to machine credentials';
+  String get backToMachineDetails =>
+      isZh ? '返回机器详情' : 'Back to machine details';
   String get sshTerminalExited =>
       isZh ? '终端会话已退出。' : 'The terminal session has exited.';
   String get sshTerminalReplaced =>

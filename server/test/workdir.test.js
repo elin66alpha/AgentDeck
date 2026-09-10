@@ -84,6 +84,17 @@ test('getDefaultWorkdir honors RELAY_DEFAULT_DIR', () => {
   }
 });
 
+test('getDefaultWorkdir uses a Relay folder in the home directory by default', () => {
+  const prev = process.env.RELAY_DEFAULT_DIR;
+  try {
+    delete process.env.RELAY_DEFAULT_DIR;
+    assert.equal(getDefaultWorkdir(), path.join(os.homedir(), 'Relay'));
+  } finally {
+    if (prev === undefined) delete process.env.RELAY_DEFAULT_DIR;
+    else process.env.RELAY_DEFAULT_DIR = prev;
+  }
+});
+
 test('resolveRequestWorkdir creates a missing default dir and returns it', () => {
   const prev = process.env.RELAY_DEFAULT_DIR;
   const dir = scratchDir();

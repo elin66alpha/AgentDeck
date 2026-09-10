@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
 
-const { markExpiredQuotas } = require('../lib/usage');
+const { buildUsageReport, markExpiredQuotas } = require('../lib/usage');
 
 const NOW = Date.parse('2026-06-19T12:00:00Z');
 
@@ -37,4 +37,11 @@ test('markExpiredQuotas ignores buckets without a reset time', () => {
   const quotas = [{ key: 'five_hour', resetsAt: null, expired: false }];
   const out = markExpiredQuotas(quotas, true, NOW);
   assert.equal(out[0].expired, false);
+});
+
+test('buildUsageReport rejects an unknown source before querying anything', async () => {
+  await assert.rejects(buildUsageReport({ source: 'nope' }), {
+    status: 400,
+    message: 'Unknown usage source: nope',
+  });
 });

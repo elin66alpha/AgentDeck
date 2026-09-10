@@ -15,12 +15,12 @@ module.exports = function createQuotaRouter(ctx) {
   } = ctx;
   const router = express.Router();
 
-  router.get('/api/usage', async (_req, res) => {
+  router.get('/api/usage', async (req, res) => {
     try {
-      const report = await buildUsageReport();
+      const report = await buildUsageReport({ source: req.query.source });
       return res.json(report);
     } catch (err) {
-      return res.status(500).json({ error: err.message });
+      return res.status(err.status || 500).json({ error: err.message });
     }
   });
 

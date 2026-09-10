@@ -8,8 +8,8 @@ const path = require('path');
 // `x-workdir` request header, so two devices can work in different paths at the
 // same time. This module only validates, resolves, and creates paths; there is
 // no shared "current workdir" state anymore. The `.env` RELAY_DEFAULT_DIR is
-// kept solely as the default a brand-new device starts from. Session identity
-// is keyed by workdir + agent + chat session in server.js.
+// kept solely as an optional override for the default a brand-new device starts
+// from. Session identity is keyed by workdir + agent + chat session in server.js.
 const ENV_PATH = path.join(__dirname, '..', '.env');
 
 class WorkdirError extends Error {
@@ -24,7 +24,7 @@ class WorkdirError extends Error {
 
 function expandWorkdir(value) {
   const raw = String(value || '').trim();
-  if (!raw) return path.join(os.homedir(), 'agent_deck');
+  if (!raw) return path.join(os.homedir(), 'Relay');
   if (raw === '~') return os.homedir();
   if (raw.startsWith('~/')) return path.join(os.homedir(), raw.slice(2));
   return raw;
@@ -55,7 +55,7 @@ function resolveWorkdir(value) {
 }
 
 // The path a brand-new device (one that has not chosen a workdir yet) starts
-// from. Comes from RELAY_DEFAULT_DIR when set, otherwise ~/agent_deck.
+// from. Comes from RELAY_DEFAULT_DIR when set, otherwise ~/Relay.
 function getDefaultWorkdir() {
   return process.env.RELAY_DEFAULT_DIR
     ? resolveWorkdir(process.env.RELAY_DEFAULT_DIR)

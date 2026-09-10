@@ -584,6 +584,20 @@ class UsageReport {
   final String createdAt;
   final List<UsageAgent> agents;
   final bool hasStale;
+
+  /// This report with [other]'s agents replacing same-key entries in place and
+  /// new ones appended, so per-source queries can land one at a time.
+  UsageReport merge(UsageReport other) {
+    final List<UsageAgent> merged = <String, UsageAgent>{
+      for (final UsageAgent agent in agents) agent.key: agent,
+      for (final UsageAgent agent in other.agents) agent.key: agent,
+    }.values.toList(growable: false);
+    return UsageReport(
+      createdAt: other.createdAt,
+      agents: merged,
+      hasStale: merged.any((UsageAgent agent) => agent.stale),
+    );
+  }
 }
 
 class QuotaSchedule {
@@ -1030,10 +1044,12 @@ class BackendClient {
     );
   }
 
-  Future<UsageReport> usageReport() async {
+  Future<UsageReport> usageReport({String? source}) async {
     final Object? decoded = await _requestJson(
       'GET',
-      '/api/usage',
+      source == null
+          ? '/api/usage'
+          : '/api/usage?source=${Uri.encodeQueryComponent(source)}',
       timeout: const Duration(seconds: 45),
     );
     if (decoded is! Map) {
@@ -1479,6 +1495,16 @@ class BackendClient {
       throw BackendException('Invalid work directory response.');
     }
     return WorkdirInfo.fromJson(decoded.cast<String, Object?>());
+  }
+
+  /// Work directories with conversation history on this machine, most recent
+  /// first.
+  Future<List<String>> recentWorkdirs() async {
+    final Object? decoded = await _requestJson('GET', '/api/workdirs/recent');
+    final Object? workdirs = decoded is Map ? decoded['workdirs'] : null;
+    return workdirs is List
+        ? workdirs.whereType<String>().toList(growable: false)
+        : const <String>[];
   }
 
   Future<WorkdirInfo> setWorkdir(String path, {bool create = false}) async {

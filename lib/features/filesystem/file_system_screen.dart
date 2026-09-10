@@ -317,18 +317,18 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
                           runSpacing: 8,
                           children: <Widget>[
                             FilledButton.icon(
-                              onPressed: _isLoading || _isBusy
-                                  ? null
-                                  : () => _pickUpload(),
-                              icon: const Icon(Icons.upload_file_outlined),
-                              label: Text(context.l10n.uploadFile),
-                            ),
-                            OutlinedButton.icon(
                               onPressed: _isLoading || _isBusy || atWorkPath
                                   ? null
                                   : _setAsWorkPath,
                               icon: const Icon(Icons.flag_outlined),
                               label: Text(context.l10n.setAsWorkPath),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: _isLoading || _isBusy
+                                  ? null
+                                  : () => _pickUpload(),
+                              icon: const Icon(Icons.upload_file_outlined),
+                              label: Text(context.l10n.uploadFile),
                             ),
                             OutlinedButton.icon(
                               onPressed: _isLoading || _isBusy
@@ -469,6 +469,9 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
                   downloadActive: _downloadActive,
                   onOpen: (FsEntry entry) => _browse(entry.path),
                   onDownload: _download,
+                  onParent: listing.parentPath == null || _isBusy
+                      ? null
+                      : () => _browse(listing.parentPath!),
                 ),
               ),
           ],
@@ -589,6 +592,7 @@ class _FileList extends StatelessWidget {
     required this.downloadActive,
     required this.onOpen,
     required this.onDownload,
+    required this.onParent,
   });
 
   final FsListing listing;
@@ -596,6 +600,19 @@ class _FileList extends StatelessWidget {
   final bool downloadActive;
   final ValueChanged<FsEntry> onOpen;
   final ValueChanged<FsEntry> onDownload;
+  final VoidCallback? onParent;
+
+  // Swiping right over the list goes up one folder, like the parent button.
+  Widget _swipeToParent(Widget child) {
+    return GestureDetector(
+      onHorizontalDragEnd: onParent == null
+          ? null
+          : (DragEndDetails details) {
+              if ((details.primaryVelocity ?? 0) > 300) onParent!();
+            },
+      child: child,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -605,10 +622,12 @@ class _FileList extends StatelessWidget {
           alignment: Alignment.topCenter,
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 1040),
-            child: _FileListFrame(
-              first: true,
-              last: true,
-              child: ListTile(title: Text(context.l10n.emptyFolder)),
+            child: _swipeToParent(
+              _FileListFrame(
+                first: true,
+                last: true,
+                child: ListTile(title: Text(context.l10n.emptyFolder)),
+              ),
             ),
           ),
         ),
@@ -622,25 +641,28 @@ class _FileList extends StatelessWidget {
           alignment: Alignment.topCenter,
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 1040),
-            child: _FileListFrame(
-              first: index == 0,
-              last: index == listing.entries.length - 1,
-              child: ListTile(
-                leading: Icon(
-                  entry.isDirectory
-                      ? Icons.folder_outlined
-                      : Icons.insert_drive_file_outlined,
-                ),
-                title: Text(entry.name),
-                subtitle: Text(_subtitleFor(context, entry)),
-                enabled: !isBusy,
-                onTap:
-                    entry.isDirectory && !isBusy ? () => onOpen(entry) : null,
-                trailing: IconButton(
-                  tooltip: context.l10n.download,
-                  onPressed:
-                      isBusy || downloadActive ? null : () => onDownload(entry),
-                  icon: const Icon(Icons.download_outlined),
+            child: _swipeToParent(
+              _FileListFrame(
+                first: index == 0,
+                last: index == listing.entries.length - 1,
+                child: ListTile(
+                  leading: Icon(
+                    entry.isDirectory
+                        ? Icons.folder_outlined
+                        : Icons.insert_drive_file_outlined,
+                  ),
+                  title: Text(entry.name),
+                  subtitle: Text(_subtitleFor(context, entry)),
+                  enabled: !isBusy,
+                  onTap:
+                      entry.isDirectory && !isBusy ? () => onOpen(entry) : null,
+                  trailing: IconButton(
+                    tooltip: context.l10n.download,
+                    onPressed: isBusy || downloadActive
+                        ? null
+                        : () => onDownload(entry),
+                    icon: const Icon(Icons.download_outlined),
+                  ),
                 ),
               ),
             ),
